@@ -510,6 +510,8 @@ class MainWindow(QMainWindow):
         body = QVBoxLayout()
         body.setSpacing(5)
         self.video_surface = QWidget()
+        # MPV --wid must target a real child X11 window owned by this Qt page.
+        self.video_surface.setAttribute(Qt.WA_NativeWindow, True)
         self.video_surface.setMinimumSize(300, 170)
         self.video_surface.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.video_surface.setStyleSheet("background:#000000;border:1px solid #384354;")
@@ -960,7 +962,11 @@ class MainWindow(QMainWindow):
             pass
         process = QProcess(self)
         self.player_process = process
-        args = ["--no-osc", "--force-window=yes", f"--wid={int(self.video_surface.winId())}",
+        # Attach MPV to the native Qt child window; do not create a separate
+        # top-level MPV window. HG680P's verified audible ALSA route is dmix.
+        args = ["--no-osc", f"--wid={int(self.video_surface.winId())}",
+                "--ao=alsa",
+                "--audio-device=alsa/dmix:CARD=S905XP212,DEV=0",
                 f"--input-ipc-server={self.ipc_path}",
                 f"--ytdl-format={QUALITY_FORMATS[self.quality.currentText()]}",
                 # Keep subtitle enumeration out of the startup path; metadata is fetched later.
