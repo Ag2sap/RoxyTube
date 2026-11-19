@@ -19,7 +19,8 @@ A lightweight YouTube TV-style frontend for HG680P / Armbian Noble (ARM64).
 - Quality preference: Auto, 360p, 480p, 720p (limited by formats YouTube exposes). A quality change restarts the stream at the current playback position and reapplies the selected subtitle.
 - Automatic next-video playback follows the current result/queue order.
 - Fullscreen playback hides surrounding UI; the timeline and controls reappear on mouse movement near the bottom or D-pad Down, then auto-hide after one second of inactivity.
-- Back from playback returns to the Home/results page while audio playback continues. A bordered mini-player in the Home header shows the scrolling title, progress, and remote-friendly controls; selecting its title returns to the active video without restarting it.
+- Back from playback returns to the Home/results page while audio playback continues; no floating video window is shown. A bordered mini-player in the Home header shows the scrolling title, progress, and remote-friendly controls; selecting its title returns to the active video without restarting it.
+- The active playback queue is kept separate from newly loaded search results, so browsing or searching does not unexpectedly replace the queue currently playing. Selecting a new result deliberately replaces the active playback session.
 - Home-only window controls minimize the application without stopping playback or close the application and stop playback after confirmation.
 - Playback and window controls use Qt standard icons rather than relying on emoji glyph availability.
 - Video playback through system MPV.
