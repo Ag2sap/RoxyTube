@@ -58,89 +58,165 @@ def thumbnail_url(entry):
 
 
 class TvKeyboard(QWidget):
+    """CatTube-style 10-unit remote keyboard, adapted for YouTube search."""
+    ROW_UNITS = 10
+
     def __init__(self, target, on_finish, parent=None):
         super().__init__(parent)
         self.target, self.on_finish = target, on_finish
-        self.caps_locked, self.shift_once, self.symbol_mode = False, False, False
+        self.caps_locked = False
+        self.shift_once = False
+        self.symbol_mode = False
         self.buttons = []
+        self.key_items = []
         self.setObjectName("keyboardPanel")
         self.setStyleSheet("""
             QWidget#keyboardPanel { background:#151c26; border:1px solid #354253; border-radius:9px; }
             QPushButton { background:#303d4e; color:#f7f8fa; border:2px solid #536176;
-                border-radius:6px; padding:3px 2px; font-size:14px; font-weight:700; min-height:27px; }
+                border-radius:6px; padding:2px 1px; font-size:13px; font-weight:650; min-height:26px; }
             QPushButton:focus { background:#526781; border:3px solid #ffd166; }
+            QPushButton[keyRole="special"] { background:#25364a; }
+            QPushButton[keyRole="active"] { background:#6b5525; border-color:#ffd166; }
         """)
         self.box = QVBoxLayout(self)
-        self.box.setContentsMargins(7, 7, 7, 7)
+        self.box.setContentsMargins(7, 6, 7, 6)
         self.box.setSpacing(4)
         self.build_keys()
 
-    def build_keys(self):
+    def build_keys(self, focus_position=None):
         while self.box.count():
             item = self.box.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+            elif item.layout():
+                child = item.layout()
+                while child.count():
+                    sub = child.takeAt(0)
+                    if sub.widget():
+                        sub.widget().deleteLater()
+
         self.buttons = []
+        self.key_items = []
+
+        utility = QHBoxLayout()
+        utility.addStretch(1)
+        clear_button = QPushButton("KOSONGKAN")
+        clear_button.setFocusPolicy(Qt.StrongFocus)
+        clear_button.setProperty("keyRole", "special")
+        clear_button.clicked.connect(self.clear_text)
+        clear_button.installEventFilter(self)
+        utility.addWidget(clear_button)
+        self.box.addLayout(utility)
+
         grid = QGridLayout()
         grid.setSpacing(4)
-        for c in range(10):
-            grid.setColumnStretch(c, 1)
+        for col in range(self.ROW_UNITS):
+            grid.setColumnStretch(col, 1)
 
-        def key(label, row, col, span=1, callback=None):
+        def add_key(label, row, col, span=1, callback=None, value=None, active=False):
             button = QPushButton(label)
             button.setFocusPolicy(Qt.StrongFocus)
-            button.clicked.connect(callback or (lambda checked=False, v=label: self.insert(v)))
+            button.setProperty("keyRole", "active" if active else "special" if callback else "normal")
+            if callback is not None:
+                button.clicked.connect(callback)
+            else:
+                button.clicked.connect(lambda checked=False, v=value: self.insert(v))
+            button.installEventFilter(self)
             grid.addWidget(button, row, col, 1, span)
             self.buttons.append(button)
+            self.key_items.append({
+                "button": button, "row": row, "col": col,
+                "span": span, "center": col + span / 2,
+            })
             return button
 
         if not self.symbol_mode:
-            for r, chars in enumerate(("1234567890", "QWERTYUIOP", "ASDFGHJKL")):
-                offset = 1 if r == 2 else 0
-                for c, char in enumerate(chars):
-                    shown = char.upper() if self.caps_locked or self.shift_once else char.lower()
-                    key(shown, r, c + offset)
-            key("SHIFT", 3, 0, 2, self.toggle_shift)
-            for c, char in enumerate("ZXCVBNM"):
-                shown = char.upper() if self.caps_locked or self.shift_once else char.lower()
-                key(shown, 3, c + 2)
-            key("⌫", 3, 9, callback=self.backspace)
-            key("?123", 4, 0, 2, self.toggle_symbols)
-            key(",", 4, 2)
-            key("SPASI", 4, 3, 4, lambda: self.insert(" "))
-            key(".", 4, 7)
-            key("CAPS", 4, 8, callback=self.toggle_caps)
-            key("SELESAI", 4, 9, callback=self.finish)
+            rows = ("1234567890", "qwertyuiop", "asdfghjkl@", "zxcvbnm-_.")
         else:
-            for r, chars in enumerate(("1234567890", "!@#$%^&*()", "[]{}<>?/+=")):
-                for c, char in enumerate(chars):
-                    key(char, r, c)
-            key("ABC", 3, 0, 2, self.toggle_symbols)
-            key("-", 3, 2)
-            key("_", 3, 3)
-            key(":", 3, 4)
-            key(";", 3, 5)
-            key("'", 3, 6)
-            key('"', 3, 7)
-            key("⌫", 3, 8, 2, self.backspace)
-            key("KOSONGKAN", 4, 0, 2, self.clear_text)
-            key(",", 4, 2)
-            key("SPASI", 4, 3, 3, lambda: self.insert(" "))
-            key(".", 4, 6)
-            key("CAPS", 4, 7, callback=self.toggle_caps)
-            key("SELESAI", 4, 8, 2, self.finish)
+            rows = ("1234567890", "!@#$%^&*()", "-_=+[]{};:", "'\",./?\\|~^")
+
+        for row, chars in enumerate(rows):
+            for col, char in enumerate(chars):
+                shown = char
+                if char.isalpha() and not self.symbol_mode:
+                    upper = self.caps_locked ^ self.shift_once
+                    shown = char.upper() if upper else char.lower()
+                add_key(shown, row, col, value=char)
+
+        if not self.symbol_mode:
+            special = [
+                ("SHIFT", 2, self.toggle_shift, self.shift_once),
+                ("?123", 1, self.toggle_symbols, False),
+                ("CAPS" if not self.caps_locked else "CAPS ✓", 1, self.toggle_caps, self.caps_locked),
+                ("SPASI", 3, lambda: self.insert(" "), False),
+                ("⌫", 1, self.backspace, False),
+                ("SELESAI", 2, self.finish, False),
+            ]
+        else:
+            special = [
+                ("ABC", 2, self.toggle_symbols, False),
+                ("CAPS" if not self.caps_locked else "CAPS ✓", 1, self.toggle_caps, self.caps_locked),
+                ("SPASI", 3, lambda: self.insert(" "), False),
+                ("⌫", 1, self.backspace, False),
+                ("SELESAI", 2, self.finish, False),
+            ]
+
+        col = 0
+        for label, span, callback, active in special:
+            add_key(label, 4, col, span, callback=callback, active=active)
+            col += span
+        if col != self.ROW_UNITS:
+            raise RuntimeError(f"Keyboard special row uses {col} units, expected {self.ROW_UNITS}")
+
         self.box.addLayout(grid)
-        if self.buttons:
+        if focus_position:
+            row, col = focus_position
+            candidates = [x for x in self.key_items if x["row"] == row]
+            if candidates:
+                min(candidates, key=lambda x: abs(x["center"] - col))["button"].setFocus()
+        elif self.buttons:
             self.buttons[0].setFocus()
 
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.KeyPress:
+            key = event.key()
+            item = next((x for x in self.key_items if x["button"] is watched), None)
+            if item:
+                if key in (Qt.Key_Left, Qt.Key_Right):
+                    row_items = sorted(
+                        (x for x in self.key_items if x["row"] == item["row"]),
+                        key=lambda x: x["col"]
+                    )
+                    index = row_items.index(item)
+                    next_index = index + (1 if key == Qt.Key_Right else -1)
+                    if 0 <= next_index < len(row_items):
+                        row_items[next_index]["button"].setFocus()
+                        event.accept()
+                        return True
+                elif key in (Qt.Key_Up, Qt.Key_Down):
+                    next_row = item["row"] + (-1 if key == Qt.Key_Up else 1)
+                    if next_row < 0:
+                        self.target.setFocus()
+                        event.accept()
+                        return True
+                    if next_row <= 4:
+                        candidates = [x for x in self.key_items if x["row"] == next_row]
+                        if candidates:
+                            nearest = min(candidates, key=lambda x: abs(x["center"] - item["center"]))
+                            nearest["button"].setFocus()
+                            event.accept()
+                            return True
+        return super().eventFilter(watched, event)
+
     def insert(self, value):
-        if len(value) == 1 and value.isalpha():
-            value = value.upper() if (self.caps_locked or self.shift_once) else value.lower()
-            self.shift_once = False
-            self.build_keys()
+        if value is None:
+            return
         pos = self.target.cursorPosition()
         self.target.setText(self.target.text()[:pos] + value + self.target.text()[pos:])
         self.target.setCursorPosition(pos + len(value))
+        if value and value[-1:].isalpha() and not self.symbol_mode and self.shift_once:
+            self.shift_once = False
+            self.build_keys((1, 0))
 
     def backspace(self):
         pos = self.target.cursorPosition()
@@ -153,20 +229,20 @@ class TvKeyboard(QWidget):
 
     def toggle_caps(self):
         self.caps_locked = not self.caps_locked
-        self.build_keys()
+        self.shift_once = False
+        self.build_keys((4, 3))
 
     def toggle_shift(self):
         self.shift_once = not self.shift_once
-        self.build_keys()
+        self.build_keys((4, 0))
 
     def toggle_symbols(self):
         self.symbol_mode = not self.symbol_mode
-        self.build_keys()
+        self.shift_once = False
+        self.build_keys((4, 0))
 
     def finish(self):
         self.on_finish()
-
-
 
 
 class VideoCard(QFrame):
