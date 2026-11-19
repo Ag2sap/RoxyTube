@@ -1,4 +1,4 @@
-# Roxy YouTube TV
+# RoxyTube
 
 A lightweight YouTube TV-style frontend for HG680P / Armbian Noble (ARM64).
 
@@ -12,17 +12,17 @@ A lightweight YouTube TV-style frontend for HG680P / Armbian Noble (ARM64).
 - Integrated on-screen keyboard slides down below the search row and pushes the results area down; SELESAI or Back slides it away.
 - Android-TV-inspired keyboard rows with letters, digits, persistent CAPS, one-shot SHIFT, symbol page, comma, period, punctuation, space, backspace, and clear.
 - Search results shown as large 16:9 thumbnail cards in a two-column grid on 4:3 layouts, with title, channel/artist and duration.
-- D-pad navigation across search controls, keyboard and thumbnail cards.
+- D-pad navigation across search controls, keyboard and thumbnail cards, including scrolling the results viewport before focus moves back to the header.
 - PlasmaTube-inspired watch page with embedded MPV, a timeline directly below the video, 10-second rewind/forward, playback controls, and a lower queue/description panel.
 - D-pad navigation across the timeline, playback controls, queue items, and scrollable description.
-- Subtitle choices are enumerated after playback starts; the selected external track is applied to the active MPV session, preferring WebVTT when available.
-- Quality preference: Auto, 360p, 480p, 720p (limited by formats YouTube exposes). A quality change restarts the stream at the current playback position and reapplies the selected subtitle.
+- Subtitle choices are enumerated after playback starts; original/manual captions and automatic captions are listed separately when available, with a supported subtitle format selected for each language. The selected track is applied to the active MPV session.
+- Quality preference: Auto, 360p, 480p, or 720p (limited by formats YouTube exposes). A quality change restarts the stream at the current playback position and reapplies the selected subtitle. The watch page reports MPV's actual decoded stream dimensions so a 720p maximum preference is not mistaken for a guaranteed 720p source.
 - Automatic next-video playback follows the current result/queue order.
 - Fullscreen playback hides surrounding UI; the timeline and controls reappear on mouse movement near the bottom or D-pad Down, then auto-hide after one second of inactivity.
 - Back from playback returns to the Home/results page while audio playback continues; no floating video window is shown. A bordered mini-player in the Home header shows the scrolling title, progress, and remote-friendly controls; selecting its title returns to the active video without restarting it.
 - The active playback queue is kept separate from newly loaded search results, so browsing or searching does not unexpectedly replace the queue currently playing. Selecting a new result deliberately replaces the active playback session.
-- Home-only window controls minimize the application without stopping playback or close the application and stop playback after confirmation.
-- Playback and window controls use Qt standard icons rather than relying on emoji glyph availability.
+- Home-only window controls stay pinned to the top-right corner; minimizing keeps playback running, while closing stops playback after confirmation. The app window remains frameless when restored or returned from playback fullscreen.
+- Playback and window controls use compact Qt standard icons rather than relying on emoji glyph availability. The Home mini-player uses a pixel-measured scrolling title and a circular progress indicator.
 - Video playback through system MPV.
 
 ## Requirements
