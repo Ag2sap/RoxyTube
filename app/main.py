@@ -983,6 +983,7 @@ class MainWindow(QMainWindow):
                 # Never let MPV consume the TV remote; Roxy handles D-pad keys
                 # and sends explicit playback commands over MPV IPC.
                 "--input-vo-keyboard=no", "--input-default-bindings=no",
+                f"--volume={self.volume_slider.value()}",
                 "--ao=alsa",
                 "--audio-device=alsa/dmix:CARD=S905XP212,DEV=0",
                 f"--input-ipc-server={self.ipc_path}",
