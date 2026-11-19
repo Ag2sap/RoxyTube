@@ -8,7 +8,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QProcess, QUrl, QSize
+from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QSize
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PySide6.QtWidgets import (
@@ -181,6 +181,7 @@ class MainWindow(QMainWindow):
 
         self.list = QListWidget()
         self.list.setIconSize(QSize(112, 64))
+        self.list.setWordWrap(True)
         self.list.itemActivated.connect(self.play_selected)
         self.root_layout.addWidget(self.list, 1)
 
@@ -203,6 +204,14 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         self.apply_safe_area()
         self.query.setFocus()
+        QApplication.instance().installEventFilter(self)
+        self.setTabOrder(self.query, self.keyboard_button)
+        self.setTabOrder(self.keyboard_button, self.search_button)
+        self.setTabOrder(self.search_button, self.quality)
+        self.setTabOrder(self.quality, self.list)
+        self.setTabOrder(self.list, self.play_button)
+        self.setTabOrder(self.play_button, self.stop_button)
+        self.setTabOrder(self.stop_button, self.minimize_button)
 
     def open_keyboard(self):
         dialog = VirtualKeyboardDialog(self.query, self)
@@ -352,6 +361,82 @@ class MainWindow(QMainWindow):
             if process and process.state() != QProcess.NotRunning:
                 process.terminate()
         super().closeEvent(event)
+
+    def eventFilter(self, watched, event):
+        # Central D-pad routing keeps navigation predictable across child widgets.
+        if event.type() != QEvent.KeyPress or not self.isActiveWindow():
+            return super().eventFilter(watched, event)
+        focus = QApplication.focusWidget()
+        if focus is None:
+            return super().eventFilter(watched, event)
+        key = event.key()
+
+        if focus is self.query:
+            if key == Qt.Key_Down:
+                self.quality.setFocus()
+                return True
+            if key == Qt.Key_Right and self.query.cursorPosition() >= len(self.query.text()):
+                self.keyboard_button.setFocus()
+                return True
+        elif focus is self.keyboard_button:
+            if key == Qt.Key_Left:
+                self.query.setFocus()
+                return True
+            if key == Qt.Key_Right:
+                self.search_button.setFocus()
+                return True
+            if key == Qt.Key_Down:
+                self.quality.setFocus()
+                return True
+        elif focus is self.search_button:
+            if key == Qt.Key_Left:
+                self.keyboard_button.setFocus()
+                return True
+            if key == Qt.Key_Down:
+                self.quality.setFocus()
+                return True
+        elif focus is self.quality:
+            if key == Qt.Key_Up:
+                self.search_button.setFocus()
+                return True
+            if key == Qt.Key_Down and self.list.count():
+                self.list.setFocus()
+                if self.list.currentRow() < 0:
+                    self.list.setCurrentRow(0)
+                return True
+            if key == Qt.Key_Right:
+                self.play_button.setFocus()
+                return True
+        elif focus is self.list:
+            if key == Qt.Key_Up and self.list.currentRow() <= 0:
+                self.quality.setFocus()
+                return True
+            if key == Qt.Key_Down and self.list.currentRow() >= self.list.count() - 1:
+                self.play_button.setFocus()
+                return True
+            if key == Qt.Key_Right:
+                self.play_button.setFocus()
+                return True
+        elif focus is self.play_button:
+            if key == Qt.Key_Left:
+                self.quality.setFocus()
+                return True
+            if key == Qt.Key_Right and self.stop_button.isEnabled():
+                self.stop_button.setFocus()
+                return True
+            if key == Qt.Key_Up and self.list.count():
+                self.list.setFocus()
+                if self.list.currentRow() < 0:
+                    self.list.setCurrentRow(0)
+                return True
+        elif focus is self.stop_button:
+            if key == Qt.Key_Left:
+                self.play_button.setFocus()
+                return True
+            if key == Qt.Key_Up and self.list.count():
+                self.list.setFocus()
+                return True
+        return super().eventFilter(watched, event)
 
     def keyPressEvent(self, event):
         key = event.key()
