@@ -2144,7 +2144,7 @@ class MainWindow(QMainWindow):
                         self.close_button.setFocus(); return True
                     if key == Qt.Key_Left:
                         (self.mini_title_button if self.mini_player.isVisible()
-                         else self.query).setFocus(); return True
+                         else self.keyboard_button).setFocus(); return True
                     if key == Qt.Key_Down:
                         self.keyboard_button.setFocus(); return True
                 if focus is self.close_button:
