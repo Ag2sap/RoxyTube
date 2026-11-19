@@ -512,6 +512,9 @@ class MainWindow(QMainWindow):
         self.video_surface = QWidget()
         # MPV --wid must target a real child X11 window owned by this Qt page.
         self.video_surface.setAttribute(Qt.WA_NativeWindow, True)
+        # The embedded MPV child must never become the Qt focus target.
+        # Roxy owns remote/D-pad navigation; playback is controlled via IPC.
+        self.video_surface.setFocusPolicy(Qt.NoFocus)
         self.video_surface.setMinimumSize(300, 170)
         self.video_surface.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.video_surface.setStyleSheet("background:#000000;border:1px solid #384354;")
@@ -953,6 +956,8 @@ class MainWindow(QMainWindow):
         self.populate_playlist()
         self.pages.setCurrentWidget(self.player_page)
         self.video_surface.winId()
+        # Keep keyboard focus in Roxy when MPV is embedded in the native surface.
+        self.play_pause_button.setFocus(Qt.OtherFocusReason)
         self._launch_player()
 
     def _launch_player(self):
@@ -975,6 +980,9 @@ class MainWindow(QMainWindow):
         # Attach MPV to the native Qt child window; do not create a separate
         # top-level MPV window. HG680P's verified audible ALSA route is dmix.
         args = ["--no-osc", "--vo=x11", f"--wid={int(self.video_surface.winId())}",
+                # Never let MPV consume the TV remote; Roxy handles D-pad keys
+                # and sends explicit playback commands over MPV IPC.
+                "--input-vo-keyboard=no", "--input-default-bindings=no",
                 "--ao=alsa",
                 "--audio-device=alsa/dmix:CARD=S905XP212,DEV=0",
                 f"--input-ipc-server={self.ipc_path}",
