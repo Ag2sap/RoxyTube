@@ -533,6 +533,7 @@ class MainWindow(QMainWindow):
         for widget in (self.mini_rewind_button, self.mini_play_pause_button,
                        self.mini_fast_forward_button, self.mini_stop_button):
             widget.setIconSize(QSize(16, 16))
+            widget.setStyleSheet("QPushButton{padding:0;border-radius:5px;}")
             widget.setFocusPolicy(Qt.StrongFocus)
             mini_controls.addWidget(widget)
         mini_controls.addStretch(1)
@@ -749,6 +750,7 @@ class MainWindow(QMainWindow):
         self.rewind_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSeekBackward))
         self.rewind_button.setFixedSize(32, 30)
         self.rewind_button.setIconSize(QSize(18, 18))
+        self.rewind_button.setStyleSheet("QPushButton{padding:0;border-radius:5px;}")
         self.rewind_button.setToolTip("Mundur 10 detik")
         self.rewind_button.clicked.connect(lambda: self.seek_relative(-10))
         self.play_pause_button = QPushButton()
@@ -760,6 +762,7 @@ class MainWindow(QMainWindow):
         self.fast_forward_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSeekForward))
         self.fast_forward_button.setFixedSize(32, 30)
         self.fast_forward_button.setIconSize(QSize(18, 18))
+        self.fast_forward_button.setStyleSheet("QPushButton{padding:0;border-radius:5px;}")
         self.fast_forward_button.setToolTip("Maju 10 detik")
         self.fast_forward_button.clicked.connect(lambda: self.seek_relative(10))
         self.next_video_button = QPushButton()
@@ -780,6 +783,7 @@ class MainWindow(QMainWindow):
         self.fullscreen_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMaxButton))
         self.fullscreen_button.setFixedSize(32, 30)
         self.fullscreen_button.setIconSize(QSize(17, 17))
+        self.fullscreen_button.setStyleSheet("QPushButton{padding:0;border-radius:5px;}")
         self.fullscreen_button.setToolTip("Fullscreen playback")
         self.fullscreen_button.clicked.connect(self.toggle_playback_fullscreen)
         self.quality = QComboBox()
