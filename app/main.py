@@ -1042,6 +1042,7 @@ class MainWindow(QMainWindow):
         self.mini_player.setVisible(self.background_playback)
         self.window_controls_widget.setVisible(self.background_playback)
         self.current_index = index
+        self.set_mini_controls_enabled(False)
         self.manual_stop = False
         self.selected_subtitle_track = None
         self.current_time_pos = max(0.0, float(start_position or 0.0))
@@ -1136,6 +1137,7 @@ class MainWindow(QMainWindow):
         if process is self.player_process:
             self.player_status.setText("Mengambil stream video…")
             self.set_playback_controls_enabled(True)
+            self.set_mini_controls_enabled(True)
             self.mpv_event_attempts = 0
             QTimer.singleShot(250, lambda i=self.current_index, p=process:
                               self.connect_mpv_events(i, p))
@@ -1276,6 +1278,7 @@ class MainWindow(QMainWindow):
             finished_index = self.current_index
             self.player_process = None
             self.set_playback_controls_enabled(False)
+            self.set_mini_controls_enabled(False)
             if finished_naturally and finished_index + 1 < len(self.results):
                 self.player_status.setText("Video selesai. Memutar video berikutnya…")
                 keep_background = self.background_playback
@@ -1310,6 +1313,7 @@ class MainWindow(QMainWindow):
                 self.pages.currentWidget() == self.search_page
             )
             self.set_playback_controls_enabled(False)
+            self.set_mini_controls_enabled(False)
             self.player_status.setText("MPV gagal dijalankan.")
         try:
             process.deleteLater()
@@ -1426,6 +1430,11 @@ class MainWindow(QMainWindow):
         self.play_pause_button.setText(label)
         self.mini_play_pause_button.setText(label)
 
+    def set_mini_controls_enabled(self, enabled):
+        for widget in (self.mini_rewind_button, self.mini_play_pause_button,
+                       self.mini_fast_forward_button, self.mini_stop_button):
+            widget.setEnabled(bool(enabled))
+
     def set_playback_controls_enabled(self, enabled):
         for widget in (self.rewind_button, self.play_pause_button, self.fast_forward_button,
                        self.seek_slider, self.volume_slider, self.quality, self.subtitle_box,
@@ -1534,6 +1543,7 @@ class MainWindow(QMainWindow):
         if self.is_playback_fullscreen:
             self.exit_playback_fullscreen()
         self.manual_stop = True
+        self.set_mini_controls_enabled(False)
         self.background_playback = False
         self.mini_player.hide()
         self.window_controls_widget.show()
