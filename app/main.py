@@ -125,6 +125,10 @@ class MainWindow(QMainWindow):
         self.safe_margins = safe_area_margins()
         self.ipc_path = f"/tmp/roxy-youtube-tv-{os.getpid()}.sock"
         self.mpv_socket = None
+        self.mpv_event_socket = None
+        self.mpv_event_attempts = 0
+        self.mpv_event_buffer = ""
+        self.metadata_requested_index = None
         self.setStyleSheet("""
             QMainWindow, QWidget { background:#101318; color:#f4f6f8; font-family:Sans; }
             QLabel#brand { color:#ffffff; font-size:17px; font-weight:750; }
@@ -543,14 +547,66 @@ class MainWindow(QMainWindow):
         process.started.connect(lambda p=process: self.player_started(p))
         process.finished.connect(lambda code, _status, p=process: self.player_finished(p, code))
         process.errorOccurred.connect(lambda _err, p=process: self.player_error(p))
+        self.metadata_requested_index = None
         process.start()
-        self.fetch_metadata(index)
-        self.player_status.setText("Menyiapkan video…")
+        self.player_status.setText("Menyiapkan koneksi video…")
 
     def player_started(self, process):
         if process is self.player_process:
-            self.player_status.setText("Pemutar aktif. Menunggu video…")
+            self.player_status.setText("Mengambil stream video…")
             self.stop_button.setEnabled(True)
+            self.mpv_event_attempts = 0
+            QTimer.singleShot(250, lambda i=self.current_index, p=process:
+                              self.connect_mpv_events(i, p))
+
+    def connect_mpv_events(self, index, process):
+        """Connect to MPV IPC so metadata work starts only after playback begins."""
+        if (process is not self.player_process or index != self.current_index or
+                process.state() == QProcess.NotRunning):
+            return
+        if self.mpv_event_socket:
+            self.mpv_event_socket.abort()
+            self.mpv_event_socket.deleteLater()
+        sock = QLocalSocket(self)
+        self.mpv_event_socket = sock
+        self.mpv_event_buffer = ""
+        sock.readyRead.connect(lambda s=sock, i=index, p=process:
+                               self.read_mpv_events(s, i, p))
+        sock.connectToServer(self.ipc_path)
+        if not sock.waitForConnected(150):
+            self.mpv_event_attempts += 1
+            sock.deleteLater()
+            if self.mpv_event_attempts < 20:
+                QTimer.singleShot(250, lambda i=index, p=process:
+                                  self.connect_mpv_events(i, p))
+            return
+        # MPV emits file-loaded and playback-restart events on this IPC connection.
+
+    def read_mpv_events(self, sock, index, process):
+        if sock is not self.mpv_event_socket:
+            return
+        self.mpv_event_buffer += bytes(sock.readAll()).decode("utf-8", "replace")
+        while "\n" in self.mpv_event_buffer:
+            line, self.mpv_event_buffer = self.mpv_event_buffer.split("\n", 1)
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            event = message.get("event")
+            if event == "playback-restart":
+                self.schedule_metadata_after_start(index, process, 1200)
+            elif event == "file-loaded":
+                # Fallback for audio-only or unusual streams without playback-restart.
+                self.schedule_metadata_after_start(index, process, 3000)
+
+    def schedule_metadata_after_start(self, index, process, delay_ms):
+        if self.metadata_requested_index == index:
+            return
+        self.metadata_requested_index = index
+        QTimer.singleShot(delay_ms, lambda i=index, p=process:
+            self.fetch_metadata(i) if (
+                p is self.player_process and i == self.current_index and
+                p.state() != QProcess.NotRunning) else None)
 
     def player_finished(self, process, exit_code):
         if process is self.player_process:
