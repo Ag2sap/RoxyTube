@@ -3,7 +3,7 @@
 from __future__ import annotations
 import json, os, shutil, sys
 from pathlib import Path
-from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve, QSize
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDiskCache, QLocalSocket, QLocalServer
 from PySide6.QtWidgets import (
@@ -745,8 +745,10 @@ class MainWindow(QMainWindow):
         self.previous_video_button.clicked.connect(
             lambda: self.play_index(self.current_index - 1, queue=self.playback_queue)
         )
-        self.rewind_button = QPushButton("-10")
-        self.rewind_button.setFixedWidth(46)
+        self.rewind_button = QPushButton()
+        self.rewind_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSeekBackward))
+        self.rewind_button.setFixedSize(32, 30)
+        self.rewind_button.setIconSize(QSize(18, 18))
         self.rewind_button.setToolTip("Mundur 10 detik")
         self.rewind_button.clicked.connect(lambda: self.seek_relative(-10))
         self.play_pause_button = QPushButton()
@@ -754,8 +756,10 @@ class MainWindow(QMainWindow):
         self.play_pause_button.setToolTip("Jeda / lanjut")
         self.play_pause_button.clicked.connect(self.toggle_play_pause)
         self.play_pause_button.setFocusPolicy(Qt.StrongFocus)
-        self.fast_forward_button = QPushButton("+10")
-        self.fast_forward_button.setFixedWidth(46)
+        self.fast_forward_button = QPushButton()
+        self.fast_forward_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSeekForward))
+        self.fast_forward_button.setFixedSize(32, 30)
+        self.fast_forward_button.setIconSize(QSize(18, 18))
         self.fast_forward_button.setToolTip("Maju 10 detik")
         self.fast_forward_button.clicked.connect(lambda: self.seek_relative(10))
         self.next_video_button = QPushButton()
@@ -772,13 +776,17 @@ class MainWindow(QMainWindow):
         self.subtitle_box.setMinimumWidth(105)
         self.subtitle_box.addItem("Subtitle: Off", None)
         self.subtitle_box.currentIndexChanged.connect(self.select_subtitle)
-        self.fullscreen_button = QPushButton("Maximize")
+        self.fullscreen_button = QPushButton()
+        self.fullscreen_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMaxButton))
+        self.fullscreen_button.setFixedSize(32, 30)
+        self.fullscreen_button.setIconSize(QSize(17, 17))
         self.fullscreen_button.setToolTip("Fullscreen playback")
         self.fullscreen_button.clicked.connect(self.toggle_playback_fullscreen)
         self.quality = QComboBox()
         self.quality.addItems(list(QUALITY_FORMATS))
         self.quality.setCurrentText("720p")
-        self.quality.setMinimumWidth(75)
+        self.quality.setMinimumWidth(68)
+        self.quality.setToolTip("Batas resolusi maksimum stream; resolusi aktual ditampilkan di bawah judul video.")
         self.quality.currentTextChanged.connect(self.change_quality)
         controls.addWidget(self.previous_video_button)
         controls.addWidget(self.rewind_button)
@@ -796,7 +804,6 @@ class MainWindow(QMainWindow):
         controls.addWidget(QLabel("VOL"))
         controls.addWidget(self.volume_slider)
         controls.addStretch(1)
-        controls.addWidget(QLabel("Kualitas"))
         controls.addWidget(self.quality)
         controls.addWidget(QLabel("CC"))
         controls.addWidget(self.subtitle_box)
@@ -811,6 +818,7 @@ class MainWindow(QMainWindow):
         self.set_playback_controls_enabled(False)
 
         self.apply_safe_area()
+        self.position_window_controls()
         self.query.setFocus()
         QApplication.instance().installEventFilter(self)
         self.show_side_panel("playlist")
@@ -827,6 +835,17 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         self.apply_safe_area()
         self.refresh_card_columns()
+        self.position_window_controls()
+        if self.mini_player.isVisible():
+            QTimer.singleShot(0, self.advance_mini_title)
+
+    def position_window_controls(self):
+        if not hasattr(self, "window_controls_widget"):
+            return
+        self.window_controls_widget.move(
+            max(0, self.search_page.width() - self.window_controls_widget.width() - 5), 3
+        )
+        self.window_controls_widget.raise_()
 
     def refresh_card_columns(self):
         if not hasattr(self, "scroll"):
@@ -1139,7 +1158,10 @@ class MainWindow(QMainWindow):
         self.set_mini_title(video["title"])
         channel = video.get("channel") or "YouTube"
         duration = video.get("duration") or ""
-        self.player_meta.setText(f"{channel}  •  {duration}" if duration else channel)
+        self.current_channel = channel
+        self.current_duration_label = duration
+        self.stream_width = self.stream_height = 0
+        self.update_stream_resolution()
         self.player_status.setText("Menghubungkan ke YouTube…")
         self.subtitle_box.blockSignals(True)
         self.subtitle_box.clear()
@@ -1284,6 +1306,8 @@ class MainWindow(QMainWindow):
             ["observe_property", 1, "time-pos"],
             ["observe_property", 2, "duration"],
             ["observe_property", 3, "pause"],
+            ["observe_property", 4, "video-params/w"],
+            ["observe_property", 5, "video-params/h"],
         ):
             sock.write(json.dumps({"command": command}).encode("utf-8") + b"\n")
         sock.flush()
@@ -1321,6 +1345,12 @@ class MainWindow(QMainWindow):
                 elif name == "pause" and isinstance(value, bool):
                     self.playback_paused = value
                     self.update_play_pause_icons()
+                elif name == "video-params/w" and isinstance(value, (int, float)):
+                    self.stream_width = max(0, int(value))
+                    self.update_stream_resolution()
+                elif name == "video-params/h" and isinstance(value, (int, float)):
+                    self.stream_height = max(0, int(value))
+                    self.update_stream_resolution()
 
     def schedule_metadata_after_start(self, index, process, delay_ms):
         if self.metadata_requested_index == index:
@@ -1699,7 +1729,7 @@ class MainWindow(QMainWindow):
         self.player_status.hide()
         self.timeline_widget.hide()
         self.controls_widget.hide()
-        self.fullscreen_button.setText("Minimize")
+        self.fullscreen_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarNormalButton))
         self.fullscreen_button.setToolTip("Kembali ke tampilan normal")
         self.fullscreen_controls_visible = False
         self.player_page.setFocus()
@@ -1715,7 +1745,7 @@ class MainWindow(QMainWindow):
         self.player_status.show()
         self.timeline_widget.show()
         self.controls_widget.show()
-        self.fullscreen_button.setText("Maximize")
+        self.fullscreen_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMaxButton))
         self.fullscreen_button.setToolTip("Fullscreen playback")
         self.play_pause_button.setFocus(Qt.OtherFocusReason)
 
@@ -1742,8 +1772,8 @@ class MainWindow(QMainWindow):
         self.mini_title_offset = 0
         self.mini_title_button.setToolTip(self.mini_title_text)
         self.advance_mini_title()
-        text_width = self.mini_title_button.fontMetrics().horizontalAdvance(self.mini_title_text)
-        if text_width > self.mini_title_button.width() - 22:
+        available = max(1, self.mini_title_button.contentsRect().width() - 6)
+        if self.mini_title_button.fontMetrics().horizontalAdvance(self.mini_title_text) > available:
             self.mini_title_timer.start()
         else:
             self.mini_title_timer.stop()
@@ -1753,16 +1783,31 @@ class MainWindow(QMainWindow):
         text = self.mini_title_text
         if not text:
             return
-        char_width = max(1, self.mini_title_button.fontMetrics().horizontalAdvance("M"))
-        visible = max(8, int((self.mini_title_button.width() - 22) / char_width))
-        if len(text) <= visible:
+        metrics = self.mini_title_button.fontMetrics()
+        available = max(1, self.mini_title_button.contentsRect().width() - 6)
+        if metrics.horizontalAdvance(text) <= available:
             self.mini_title_button.setText(text)
+            self.mini_title_timer.stop()
             return
         cycle = text + "   "
-        doubled = cycle + cycle
         start = self.mini_title_offset
-        self.mini_title_button.setText(doubled[start:start + visible])
+        end = start
+        while end < start + len(cycle):
+            if metrics.horizontalAdvance(cycle[start:end + 1]) > available:
+                break
+            end += 1
+        if end == start:
+            end += 1
+        self.mini_title_button.setText(cycle[start:end])
         self.mini_title_offset = (start + 1) % len(cycle)
+
+    def update_stream_resolution(self):
+        details = [self.current_channel or "YouTube"]
+        if self.current_duration_label:
+            details.append(self.current_duration_label)
+        if self.stream_width > 0 and self.stream_height > 0:
+            details.append(f"{self.stream_width}×{self.stream_height} ({self.stream_height}p)")
+        self.player_meta.setText("  •  ".join(details))
 
     def return_to_playback(self):
         if not self.process_is_running(self.player_process):
@@ -1776,6 +1821,9 @@ class MainWindow(QMainWindow):
         self.play_pause_button.setFocus(Qt.OtherFocusReason)
 
     def eventFilter(self, watched, event):
+        if event.type() == QEvent.FocusIn and watched in getattr(self, "cards", ()):
+            QTimer.singleShot(0, lambda card=watched:
+                              self.scroll.ensureWidgetVisible(card, 0, 12))
         if self.is_playback_fullscreen and event.type() == QEvent.MouseMove:
             try:
                 point = watched.mapTo(self.player_page, event.position().toPoint())
@@ -2001,16 +2049,31 @@ class MainWindow(QMainWindow):
                         active = self.nav_modes.index(self.feed_mode) if self.feed_mode in self.nav_modes else 0
                         self.nav_buttons[active].setFocus()
                         return True
-                    if key == Qt.Key_Right and cols == 2 and idx + 1 < len(self.cards):
-                        self.cards[idx+1].setFocus(); return True
+                    if key == Qt.Key_Right and idx % cols == 0 and idx + 1 < len(self.cards):
+                        self.cards[idx + 1].setFocus(); return True
                     if key == Qt.Key_Left and idx % cols:
-                        self.cards[idx-1].setFocus(); return True
+                        self.cards[idx - 1].setFocus(); return True
                     if key == Qt.Key_Down and idx + cols < len(self.cards):
-                        self.cards[idx+cols].setFocus(); return True
+                        self.cards[idx + cols].setFocus(); return True
+                    if key == Qt.Key_Down and idx + cols >= len(self.cards):
+                        bar = self.scroll.verticalScrollBar()
+                        if bar.value() < bar.maximum():
+                            step = max(bar.singleStep(), 72)
+                            bar.setValue(min(bar.maximum(), bar.value() + step))
+                            return True
+                        if self.next_page_button.isEnabled():
+                            self.next_page_button.setFocus()
+                            return True
                     if key == Qt.Key_Up and idx >= cols:
-                        self.cards[idx-cols].setFocus(); return True
+                        self.cards[idx - cols].setFocus(); return True
                     if key == Qt.Key_Up and idx < cols:
-                        self.query.setFocus(); return True
+                        bar = self.scroll.verticalScrollBar()
+                        if bar.value() > bar.minimum():
+                            step = max(bar.singleStep(), 72)
+                            bar.setValue(max(bar.minimum(), bar.value() - step))
+                            return True
+                        self.query.setFocus()
+                        return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                         self.play_index(idx); return True
                 if focus is self.query and key == Qt.Key_Up:
