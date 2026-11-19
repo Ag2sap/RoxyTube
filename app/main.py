@@ -818,7 +818,8 @@ class MainWindow(QMainWindow):
         self.subtitle_box.addItem("Subtitle: Off", None)
         self.subtitle_box.currentIndexChanged.connect(self.select_subtitle)
         self.fullscreen_button = QPushButton()
-        self.fullscreen_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMaxButton))
+        self.fullscreen_button.setIcon(monochrome_icon(
+            self.style().standardIcon(QStyle.SP_TitleBarMaxButton), QSize(17, 17)))
         self.fullscreen_button.setFixedSize(32, 30)
         self.fullscreen_button.setIconSize(QSize(17, 17))
         self.fullscreen_button.setStyleSheet("QPushButton{padding:0;border-radius:5px;}")
@@ -1228,6 +1229,7 @@ class MainWindow(QMainWindow):
         self.current_duration_label = duration
         self.stream_width = self.stream_height = 0
         self.update_stream_resolution()
+        self.loading_bar.show()
         self.player_status.setText("Menghubungkan ke YouTube…")
         self.subtitle_box.blockSignals(True)
         self.subtitle_box.clear()
@@ -1276,8 +1278,9 @@ class MainWindow(QMainWindow):
                 "--audio-device=alsa/dmix:CARD=S905XP212,DEV=0",
                 f"--input-ipc-server={self.ipc_path}",
                 f"--ytdl-format={QUALITY_FORMATS[self.quality.currentText()]}",
-                # Keep subtitle enumeration out of the startup path; metadata is fetched later.
-                "--ytdl-raw-options=sub-langs=none",
+                # Keep subtitle enumeration out of the startup path while ranking formats
+                # toward the requested resolution ceiling.
+                f"--ytdl-raw-options=sub-langs=none,format-sort=res:{self.quality.currentText().replace('p', '') if self.quality.currentText() != 'Auto' else '1080'}",
                 "--keep-open=no"]
         if self.current_time_pos > 0.5:
             args.append(f"--start={self.current_time_pos:.2f}")
@@ -1291,6 +1294,7 @@ class MainWindow(QMainWindow):
         process.errorOccurred.connect(lambda _err, p=process: self.player_error(p))
         self.playback_started = False
         process.start()
+        self.loading_bar.show()
         self.player_status.setText(f"Mencoba kualitas {self.quality.currentText()}…")
 
     def change_quality(self, quality):
@@ -1299,11 +1303,13 @@ class MainWindow(QMainWindow):
         if not self.process_is_running(self.player_process):
             return
         self.fallback_qualities = self.quality_fallbacks(quality)
+        self.loading_bar.show()
         self.player_status.setText(f"Mengganti kualitas ke {quality}…")
         self._launch_player()
 
     def player_started(self, process):
         if process is self.player_process:
+            self.loading_bar.show()
             self.player_status.setText("Mengambil stream video…")
             self.set_playback_controls_enabled(True)
             self.set_mini_controls_enabled(True)
@@ -1391,6 +1397,8 @@ class MainWindow(QMainWindow):
             event = message.get("event")
             if event == "playback-restart":
                 self.playback_started = True
+                self.loading_bar.hide()
+                self.player_status.setText("Sedang diputar.")
                 self.schedule_metadata_after_start(index, process, 1200)
                 if (self.selected_subtitle_track and
                         self.subtitle_applied_process is not process):
@@ -1400,6 +1408,8 @@ class MainWindow(QMainWindow):
                 if name == "time-pos" and isinstance(value, (int, float)):
                     self.current_time_pos = max(0.0, float(value))
                     self.playback_started = True
+                    self.loading_bar.hide()
+                    self.player_status.setText("Sedang diputar.")
                     self.update_timeline(self.current_time_pos, self.duration_seconds)
                     self.schedule_metadata_after_start(index, process, 1200)
                     if (self.selected_subtitle_track and
@@ -1457,6 +1467,7 @@ class MainWindow(QMainWindow):
             )
             finished_index = self.current_index
             self.player_process = None
+            self.loading_bar.hide()
             self.set_playback_controls_enabled(False)
             self.set_mini_controls_enabled(False)
             if finished_naturally and finished_index + 1 < len(self.playback_queue):
@@ -1487,6 +1498,7 @@ class MainWindow(QMainWindow):
             if self.retry_lower_quality(process, "MPV gagal membuka stream."):
                 return
             self.player_process = None
+            self.loading_bar.hide()
             self.background_playback = False
             self.mini_player.hide()
             self.window_controls_widget.setVisible(
@@ -1653,6 +1665,8 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(bool(enabled))
 
     def change_volume(self, value):
+        self.settings_data["volume"] = max(0, min(100, int(value)))
+        save_app_settings(self.settings_data)
         if self.process_is_running(self.player_process):
             self.mpv_command(["set_property", "volume", int(value)])
 
@@ -1806,15 +1820,18 @@ class MainWindow(QMainWindow):
         if self.is_playback_fullscreen:
             self.exit_playback_fullscreen()
             return
+        self._playback_return_state = "maximized" if self.isMaximized() else "normal"
         self.is_playback_fullscreen = True
         self.showFullScreen()
         self.player_header_widget.hide()
         self.player_meta.hide()
+        self.resolution_label.hide()
         self.side_panel.hide()
         self.player_status.hide()
         self.timeline_widget.hide()
         self.controls_widget.hide()
-        self.fullscreen_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarNormalButton))
+        self.fullscreen_button.setIcon(monochrome_icon(
+            self.style().standardIcon(QStyle.SP_TitleBarNormalButton), QSize(17, 17)))
         self.fullscreen_button.setToolTip("Kembali ke tampilan normal")
         self.fullscreen_controls_visible = False
         self.player_page.setFocus()
@@ -1823,14 +1840,19 @@ class MainWindow(QMainWindow):
         self.fullscreen_hide_timer.stop()
         self.is_playback_fullscreen = False
         self.fullscreen_controls_visible = True
-        self.showNormal()
+        if self._playback_return_state == "maximized":
+            self.showMaximized()
+        else:
+            self.showNormal()
         self.player_header_widget.show()
         self.player_meta.show()
+        self.resolution_label.show()
         self.side_panel.show()
         self.player_status.show()
         self.timeline_widget.show()
         self.controls_widget.show()
-        self.fullscreen_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMaxButton))
+        self.fullscreen_button.setIcon(monochrome_icon(
+            self.style().standardIcon(QStyle.SP_TitleBarMaxButton), QSize(17, 17)))
         self.fullscreen_button.setToolTip("Fullscreen playback")
         self.play_pause_button.setFocus(Qt.OtherFocusReason)
 
@@ -1893,6 +1915,10 @@ class MainWindow(QMainWindow):
         if self.stream_width > 0 and self.stream_height > 0:
             details.append(f"{self.stream_width}×{self.stream_height} ({self.stream_height}p)")
         self.player_meta.setText("  •  ".join(details))
+        self.resolution_label.setText(
+            f"{self.stream_width}×{self.stream_height} ({self.stream_height}p)"
+            if self.stream_width > 0 and self.stream_height > 0 else ""
+        )
 
     def return_to_playback(self):
         if not self.process_is_running(self.player_process):
