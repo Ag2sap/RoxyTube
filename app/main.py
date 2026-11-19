@@ -5,7 +5,7 @@ import json, os, shutil, sys
 from pathlib import Path
 from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QPixmap
-from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDiskCache, QLocalSocket
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDiskCache, QLocalSocket, QLocalServer
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea,
@@ -974,7 +974,7 @@ class MainWindow(QMainWindow):
         self.player_process = process
         # Attach MPV to the native Qt child window; do not create a separate
         # top-level MPV window. HG680P's verified audible ALSA route is dmix.
-        args = ["--no-osc", f"--wid={int(self.video_surface.winId())}",
+        args = ["--no-osc", "--vo=x11", f"--wid={int(self.video_surface.winId())}",
                 "--ao=alsa",
                 "--audio-device=alsa/dmix:CARD=S905XP212,DEV=0",
                 f"--input-ipc-server={self.ipc_path}",
@@ -1497,7 +1497,45 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    # LauncherTV may start the application again after its window was minimized.
+    # Reuse the existing process and restore its window instead of opening a
+    # second copy behind the launcher.
+    server_name = f"roxy-youtube-tv-{os.getuid()}"
+    probe = QLocalSocket()
+    probe.connectToServer(server_name)
+    if probe.waitForConnected(500):
+        probe.write(b"activate\\n")
+        probe.waitForBytesWritten(500)
+        probe.disconnectFromServer()
+        return 0
+
+    QLocalServer.removeServer(server_name)
+    server = QLocalServer(app)
+    if not server.listen(server_name):
+        print(f"Unable to create single-instance server: {server.errorString()}", file=sys.stderr)
+        return 1
+
     window = MainWindow()
+
+    def activate_existing_window():
+        while server.hasPendingConnections():
+            client = server.nextPendingConnection()
+            if client is None:
+                continue
+            client.waitForReadyRead(250)
+            command = bytes(client.readAll()).strip()
+            if command == b"activate":
+                if window.isMinimized():
+                    window.showNormal()
+                else:
+                    window.show()
+                window.raise_()
+                window.activateWindow()
+            client.disconnectFromServer()
+            client.deleteLater()
+
+    server.newConnection.connect(activate_existing_window)
+    app._roxy_single_instance_server = server
     window.show()
     sys.exit(app.exec())
 
