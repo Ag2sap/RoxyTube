@@ -573,14 +573,26 @@ class MainWindow(QMainWindow):
         sock.readyRead.connect(lambda s=sock, i=index, p=process:
                                self.read_mpv_events(s, i, p))
         sock.connectToServer(self.ipc_path)
-        if not sock.waitForConnected(150):
+        QTimer.singleShot(350, lambda s=sock, i=index, p=process:
+                          self.retry_mpv_event_connection(s, i, p))
+        # Keep IPC connection asynchronous; never block the TV UI waiting for MPV.
+
+    def retry_mpv_event_connection(self, sock, index, process):
+        if (sock is not self.mpv_event_socket or process is not self.player_process or
+                index != self.current_index):
+            return
+        if sock.state() == QLocalSocket.ConnectedState:
+            # Observe time-pos as a fallback if the initial playback event was missed.
+            sock.write(b'{"command":["observe_property",1,"time-pos"]}\\n')
+            sock.flush()
+            return
+        if sock.state() == QLocalSocket.UnconnectedState:
             self.mpv_event_attempts += 1
+            sock.abort()
             sock.deleteLater()
             if self.mpv_event_attempts < 20:
                 QTimer.singleShot(250, lambda i=index, p=process:
                                   self.connect_mpv_events(i, p))
-            return
-        # MPV emits file-loaded and playback-restart events on this IPC connection.
 
     def read_mpv_events(self, sock, index, process):
         if sock is not self.mpv_event_socket:
@@ -598,6 +610,8 @@ class MainWindow(QMainWindow):
             elif event == "file-loaded":
                 # Fallback for audio-only or unusual streams without playback-restart.
                 self.schedule_metadata_after_start(index, process, 3000)
+            elif event == "property-change" and message.get("name") == "time-pos":
+                self.schedule_metadata_after_start(index, process, 1200)
 
     def schedule_metadata_after_start(self, index, process, delay_ms):
         if self.metadata_requested_index == index:
