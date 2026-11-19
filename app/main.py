@@ -89,6 +89,7 @@ class VirtualKeyboardDialog(QDialog):
             ("SPASI", lambda: self.add_text(" "), 4),
             ("HAPUS", self.backspace, 2),
             ("KOSONGKAN", self.clear_text, 2),
+            ("BATAL", self.reject, 2),
             ("SELESAI", self.accept, 2),
         ]
         row_index = len(rows)
