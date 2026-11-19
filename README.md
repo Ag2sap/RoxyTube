@@ -8,7 +8,7 @@ A lightweight YouTube TV-style frontend for HG680P / Armbian Noble (ARM64).
 
 - TV-oriented dark interface with keyboard / D-pad navigation.
 - Search public YouTube videos using `yt-dlp`.
-- Display title, channel, duration and available thumbnail URL.
+- Display title, channel, duration and asynchronously loaded thumbnails when provided by yt-dlp.
 - Play selected video using the system `mpv` executable.
 - Quality preference: Auto, 360p, 480p, 720p (limited by formats YouTube exposes).
 - Shared Safe Area configuration at `~/.config/roxy-display/safe-area.json`.
@@ -57,4 +57,4 @@ Example:
 - Search depends on yt-dlp's YouTube extractor and may be affected by YouTube changes, rate limits, or access challenges.
 - A selected quality is a maximum-height preference, not a guarantee the exact resolution exists.
 - This is an independent frontend, not the official YouTube app. No account sign-in, DRM circumvention, or private-video access is provided.
-- This initial MVP displays text results; thumbnail artwork and richer TV navigation are planned next.
+- Thumbnail loading depends on the image URL returned by YouTube/yt-dlp; some results may remain text-only.\n- Remote-control behavior is keyboard-based and should be validated on the actual HG680P remote before deployment.
