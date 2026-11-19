@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""Roxy YouTube TV - single-layer TV interface for yt-dlp + mpv."""
+"""YouTube Roxy TV - embedded player, paged search and remote-friendly controls."""
 from __future__ import annotations
 import json, os, shutil, sys
 from pathlib import Path
-from PySide6.QtCore import Qt, QEvent, QProcess, QPropertyAnimation, QEasingCurve, QUrl
+from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer
 from PySide6.QtGui import QPixmap
-from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDiskCache, QLocalSocket
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea,
-    QSizePolicy, QVBoxLayout, QWidget,
+    QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-APP_NAME = "Roxy YouTube TV"
+APP_NAME = "YouTube Roxy"
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 SAFE_AREA_FILE = CONFIG_DIR / "roxy-display" / "safe-area.json"
+CACHE_DIR = Path.home() / ".cache" / "roxy-youtube-tv" / "thumbnails"
 YTDLP = os.environ.get("ROXY_YT_DLP", "yt-dlp")
 MPV = os.environ.get("ROXY_MPV", "mpv")
 QUALITY_FORMATS = {"Auto": "best", "360p": "best[height<=360]",
@@ -38,9 +39,18 @@ def video_url(entry):
         return candidate
     if video_id:
         return f"https://www.youtube.com/watch?v={video_id}"
-    if candidate and len(candidate) >= 8 and "/" not in candidate:
-        return f"https://www.youtube.com/watch?v={candidate}"
     return None
+
+
+def thumbnail_url(entry):
+    items = entry.get("thumbnails") or []
+    usable = [x for x in items if x.get("url")]
+    if usable:
+        # Prefer a modest 320-480 px image; avoid downloading full-size artwork.
+        usable.sort(key=lambda x: (0 if 240 <= (x.get("width") or 0) <= 480 else 1,
+                                   abs((x.get("width") or 320) - 320)))
+        return usable[0]["url"]
+    return entry.get("thumbnail")
 
 
 class VideoCard(QFrame):
@@ -58,24 +68,24 @@ class VideoCard(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(7, 7, 7, 7)
         layout.setSpacing(4)
-        self.image = QLabel("Memuat thumbnail…")
+        self.image = QLabel(" ")
         self.image.setAlignment(Qt.AlignCenter)
-        self.image.setMinimumHeight(90)
+        self.image.setMinimumHeight(70)
         self.image.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.image.setStyleSheet("background:#252e3b;color:#9ba8b8;border:0;font-size:12px;")
+        self.image.setStyleSheet("background:#252e3b;color:#9ba8b8;border:0;font-size:11px;")
         layout.addWidget(self.image, 1)
         self.title_label = QLabel(title)
         self.title_label.setWordWrap(True)
         self.title_label.setMaximumHeight(38)
-        self.title_label.setStyleSheet("font-size:14px;font-weight:700;color:#f4f6f8;border:0;")
+        self.title_label.setStyleSheet("font-size:13px;font-weight:700;color:#f4f6f8;border:0;")
         layout.addWidget(self.title_label)
         self.meta_label = QLabel(f"{channel}  •  {duration}" if duration else channel)
-        self.meta_label.setStyleSheet("font-size:11px;color:#aeb8c5;border:0;")
+        self.meta_label.setStyleSheet("font-size:10px;color:#aeb8c5;border:0;")
         layout.addWidget(self.meta_label)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.image.setFixedHeight(max(90, int((self.width() - 24) * 9 / 16)))
+        self.image.setFixedHeight(max(70, int((self.width() - 20) * 9 / 16)))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and callable(self.on_activate):
@@ -87,117 +97,7 @@ class VideoCard(QFrame):
             return
         self.image.setText("")
         self.image.setPixmap(pixmap.scaled(max(1, self.image.width()),
-            max(1, self.image.height()), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-
-
-class TvKeyboard(QWidget):
-    def __init__(self, target, on_finish, parent=None):
-        super().__init__(parent)
-        self.target, self.on_finish = target, on_finish
-        self.caps_locked, self.shift_once, self.symbol_mode = False, False, False
-        self.buttons = []
-        self.setObjectName("keyboardPanel")
-        self.setStyleSheet("""
-            QWidget#keyboardPanel { background:#151c26; border:1px solid #354253; border-radius:9px; }
-            QPushButton { background:#303d4e; color:#f7f8fa; border:2px solid #536176;
-                border-radius:6px; padding:3px 2px; font-size:14px; font-weight:700; min-height:27px; }
-            QPushButton:focus { background:#526781; border:3px solid #ffd166; }
-        """)
-        self.box = QVBoxLayout(self)
-        self.box.setContentsMargins(7, 7, 7, 7)
-        self.box.setSpacing(4)
-        self.build_keys()
-
-    def build_keys(self):
-        while self.box.count():
-            item = self.box.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        self.buttons = []
-        grid = QGridLayout()
-        grid.setSpacing(4)
-        for c in range(10):
-            grid.setColumnStretch(c, 1)
-
-        def key(label, row, col, span=1, callback=None):
-            button = QPushButton(label)
-            button.setFocusPolicy(Qt.StrongFocus)
-            button.clicked.connect(callback or (lambda checked=False, v=label: self.insert(v)))
-            grid.addWidget(button, row, col, 1, span)
-            self.buttons.append(button)
-            return button
-
-        if not self.symbol_mode:
-            for r, chars in enumerate(("1234567890", "QWERTYUIOP", "ASDFGHJKL")):
-                offset = 1 if r == 2 else 0
-                for c, char in enumerate(chars):
-                    shown = char.upper() if self.caps_locked or self.shift_once else char.lower()
-                    key(shown, r, c + offset)
-            key("SHIFT", 3, 0, 2, self.toggle_shift)
-            for c, char in enumerate("ZXCVBNM"):
-                shown = char.upper() if self.caps_locked or self.shift_once else char.lower()
-                key(shown, 3, c + 2)
-            key("⌫", 3, 9, callback=self.backspace)
-            key("?123", 4, 0, 2, self.toggle_symbols)
-            key(",", 4, 2)
-            key("SPASI", 4, 3, 4, lambda: self.insert(" "))
-            key(".", 4, 7)
-            key("CAPS", 4, 8, callback=self.toggle_caps)
-            key("SELESAI", 4, 9, callback=self.finish)
-        else:
-            for r, chars in enumerate(("1234567890", "!@#$%^&*()", "[]{}<>?/+=")):
-                for c, char in enumerate(chars):
-                    key(char, r, c)
-            key("ABC", 3, 0, 2, self.toggle_symbols)
-            key("-", 3, 2)
-            key("_", 3, 3)
-            key(":", 3, 4)
-            key(";", 3, 5)
-            key("'", 3, 6)
-            key('"', 3, 7)
-            key("⌫", 3, 8, 2, self.backspace)
-            key("KOSONGKAN", 4, 0, 2, self.clear_text)
-            key(",", 4, 2)
-            key("SPASI", 4, 3, 3, lambda: self.insert(" "))
-            key(".", 4, 6)
-            key("CAPS", 4, 7, callback=self.toggle_caps)
-            key("SELESAI", 4, 8, 2, self.finish)
-        self.box.addLayout(grid)
-        if self.buttons:
-            self.buttons[0].setFocus()
-
-    def insert(self, value):
-        if len(value) == 1 and value.isalpha():
-            value = value.upper() if (self.caps_locked or self.shift_once) else value.lower()
-            self.shift_once = False
-            self.build_keys()
-        pos = self.target.cursorPosition()
-        self.target.setText(self.target.text()[:pos] + value + self.target.text()[pos:])
-        self.target.setCursorPosition(pos + len(value))
-
-    def backspace(self):
-        pos = self.target.cursorPosition()
-        if pos:
-            self.target.setText(self.target.text()[:pos - 1] + self.target.text()[pos:])
-            self.target.setCursorPosition(pos - 1)
-
-    def clear_text(self):
-        self.target.clear()
-
-    def toggle_caps(self):
-        self.caps_locked = not self.caps_locked
-        self.build_keys()
-
-    def toggle_shift(self):
-        self.shift_once = not self.shift_once
-        self.build_keys()
-
-    def toggle_symbols(self):
-        self.symbol_mode = not self.symbol_mode
-        self.build_keys()
-
-    def finish(self):
-        self.on_finish()
+            max(1, self.image.height()), Qt.KeepAspectRatio, Qt.FastTransformation))
 
 
 class MainWindow(QMainWindow):
@@ -208,39 +108,60 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(560, 420)
         self.setMaximumSize(900, 675)
         self.results, self.cards = [], []
-        self.search_process = self.player_process = None
-        self.network = QNetworkAccessManager(self)
+        self.search_process = self.player_process = self.metadata_process = None
+        self.current_index = 0
+        self.current_page = 0
+        self.page_size = 8
+        self.thumbnail_queue = []
+        self.thumbnail_active = 0
         self.thumbnail_cards = {}
+        self.thumbnail_replies = set()
+        self.network = QNetworkAccessManager(self)
+        self.cache = QNetworkDiskCache(self)
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self.cache.setCacheDirectory(str(CACHE_DIR))
+        self.cache.setMaximumCacheSize(32 * 1024 * 1024)
+        self.network.setCache(self.cache)
         self.safe_margins = safe_area_margins()
-        self.keyboard_open = False
-        self.keyboard_animation = None
+        self.ipc_path = f"/tmp/roxy-youtube-tv-{os.getpid()}.sock"
+        self.mpv_socket = None
         self.setStyleSheet("""
             QMainWindow, QWidget { background:#101318; color:#f4f6f8; font-family:Sans; }
-            QLabel#brand { color:#ff4545; font-size:21px; font-weight:800; }
+            QLabel#brand { color:#ffffff; font-size:17px; font-weight:750; }
             QLabel#hint { color:#aeb8c5; font-size:11px; }
             QLineEdit,QComboBox { background:#202733; color:white; border:2px solid #465366;
-                border-radius:7px; padding:6px 8px; font-size:14px; min-height:25px; }
-            QPushButton { background:#d92727; color:white; border:2px solid transparent;
-                border-radius:7px; padding:6px 11px; font-size:13px; font-weight:700; }
-            QPushButton:focus,QLineEdit:focus,QComboBox:focus { border:3px solid #ffd166; }
+                border-radius:7px; padding:5px 7px; font-size:13px; min-height:23px; }
+            QPushButton { background:#293443; color:white; border:2px solid #465366;
+                border-radius:7px; padding:5px 8px; font-size:12px; font-weight:700; }
+            QPushButton:focus,QLineEdit:focus,QComboBox:focus { border:3px solid #ffd166; background:#3a4b60; }
+            QPushButton:disabled { color:#718096; background:#202733; }
             QScrollArea { border:0; background:transparent; }
-            QScrollBar:vertical { width:12px; background:#171d26; }
+            QScrollBar:vertical { width:11px; background:#171d26; }
             QScrollBar::handle:vertical { background:#526176; border-radius:5px; min-height:24px; }
         """)
         root = QWidget()
-        self.root_layout = QVBoxLayout(root)
-        self.root_layout.setSpacing(7)
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(0, 0, 0, 0)
         self.setCentralWidget(root)
+        self.pages = QStackedWidget()
+        outer.addWidget(self.pages)
 
+        # Search/results page
+        self.search_page = QWidget()
+        self.root_layout = QVBoxLayout(self.search_page)
+        self.root_layout.setSpacing(6)
         header = QHBoxLayout()
-        brand = QLabel("ROXY  /  YouTube")
+        logo = QLabel("▶")
+        logo.setStyleSheet("color:#ff0033;font-size:22px;font-weight:900;")
+        brand = QLabel("YouTube Roxy")
         brand.setObjectName("brand")
+        header.addWidget(logo)
         header.addWidget(brand)
         header.addStretch(1)
+        header.addWidget(QLabel("Kualitas"))
         self.quality = QComboBox()
         self.quality.addItems(list(QUALITY_FORMATS))
-        self.quality.setMaximumWidth(100)
-        header.addWidget(QLabel("Kualitas"))
+        self.quality.setMaximumWidth(85)
         header.addWidget(self.quality)
         self.root_layout.addLayout(header)
 
@@ -248,19 +169,22 @@ class MainWindow(QMainWindow):
         self.query = QLineEdit()
         self.query.setPlaceholderText("Cari video atau tempel URL YouTube…")
         self.query.returnPressed.connect(self.search)
-        self.keyboard_button = QPushButton("⌨ KEYBOARD")
-        self.keyboard_button.clicked.connect(self.toggle_keyboard)
-        self.search_button = QPushButton("CARI")
+        self.search_button = QPushButton("⌕")
+        self.search_button.setToolTip("Cari video")
         self.search_button.clicked.connect(self.search)
         search_row.addWidget(self.query, 1)
-        search_row.addWidget(self.keyboard_button)
         search_row.addWidget(self.search_button)
         self.root_layout.addLayout(search_row)
 
-        self.keyboard = TvKeyboard(self.query, self.finish_keyboard, self)
-        self.keyboard.setVisible(False)
-        self.keyboard.setMaximumHeight(0)
-        self.root_layout.addWidget(self.keyboard)
+        options = QHBoxLayout()
+        options.addWidget(QLabel("Video per halaman"))
+        self.page_size_box = QComboBox()
+        self.page_size_box.addItems(["6", "8", "12"])
+        self.page_size_box.setCurrentText("8")
+        self.page_size_box.currentTextChanged.connect(self.change_page_size)
+        options.addWidget(self.page_size_box)
+        options.addStretch(1)
+        self.root_layout.addLayout(options)
 
         self.results_heading = QLabel("HASIL VIDEO")
         self.results_heading.setObjectName("hint")
@@ -271,33 +195,112 @@ class MainWindow(QMainWindow):
         self.cards_host = QWidget()
         self.cards_grid = QGridLayout(self.cards_host)
         self.cards_grid.setContentsMargins(2, 2, 2, 2)
-        self.cards_grid.setSpacing(9)
+        self.cards_grid.setSpacing(8)
         self.scroll.setWidget(self.cards_host)
         self.root_layout.addWidget(self.scroll, 1)
 
-        footer = QHBoxLayout()
-        self.play_button = QPushButton("PUTAR")
-        self.play_button.clicked.connect(self.play_selected)
-        self.play_button.setEnabled(False)
-        self.stop_button = QPushButton("STOP")
-        self.stop_button.clicked.connect(self.stop_player)
-        self.stop_button.setEnabled(False)
+        page_nav = QHBoxLayout()
+        self.prev_page_button = QPushButton("‹")
+        self.prev_page_button.setToolTip("Halaman sebelumnya")
+        self.prev_page_button.clicked.connect(lambda: self.change_page(-1))
+        self.page_label = QLabel("0 / 0")
+        self.page_label.setAlignment(Qt.AlignCenter)
+        self.page_label.setObjectName("hint")
+        self.next_page_button = QPushButton("›")
+        self.next_page_button.setToolTip("Halaman berikutnya")
+        self.next_page_button.clicked.connect(lambda: self.change_page(1))
+        page_nav.addWidget(self.prev_page_button)
+        page_nav.addWidget(self.page_label, 1)
+        page_nav.addWidget(self.next_page_button)
+        self.root_layout.addLayout(page_nav)
         self.status = QLabel("Siap. Cari video menggunakan remote.")
         self.status.setObjectName("hint")
         self.status.setWordWrap(True)
-        footer.addWidget(self.play_button)
-        footer.addWidget(self.stop_button)
-        footer.addWidget(self.status, 1)
-        self.root_layout.addLayout(footer)
+        self.root_layout.addWidget(self.status)
+        self.pages.addWidget(self.search_page)
+
+        # Embedded player page
+        self.player_page = QWidget()
+        player_layout = QVBoxLayout(self.player_page)
+        player_layout.setContentsMargins(2, 2, 2, 2)
+        player_layout.setSpacing(5)
+        player_header = QHBoxLayout()
+        self.player_title = QLabel("Pemutar YouTube")
+        self.player_title.setObjectName("brand")
+        self.player_title.setWordWrap(True)
+        self.back_button = QPushButton("‹")
+        self.back_button.setToolTip("Kembali ke hasil")
+        self.back_button.clicked.connect(self.back_to_results)
+        player_header.addWidget(self.back_button)
+        player_header.addWidget(self.player_title, 1)
+        player_layout.addLayout(player_header)
+
+        body = QHBoxLayout()
+        self.video_surface = QWidget()
+        self.video_surface.setMinimumSize(300, 170)
+        self.video_surface.setStyleSheet("background:#000000;border:1px solid #384354;")
+        body.addWidget(self.video_surface, 3)
+        self.side_panel = QFrame()
+        self.side_panel.setMinimumWidth(150)
+        self.side_panel.setMaximumWidth(235)
+        self.side_panel.setStyleSheet("QFrame{background:#171e28;border:1px solid #354253;border-radius:7px;}")
+        side_layout = QVBoxLayout(self.side_panel)
+        side_layout.setContentsMargins(6, 6, 6, 6)
+        side_buttons = QHBoxLayout()
+        self.playlist_button = QPushButton("☷")
+        self.playlist_button.setToolTip("Playlist")
+        self.playlist_button.clicked.connect(lambda: self.show_side_panel("playlist"))
+        self.description_button = QPushButton("≡")
+        self.description_button.setToolTip("Deskripsi")
+        self.description_button.clicked.connect(lambda: self.show_side_panel("description"))
+        side_buttons.addWidget(self.playlist_button)
+        side_buttons.addWidget(self.description_button)
+        side_layout.addLayout(side_buttons)
+        self.side_content = QScrollArea()
+        self.side_content.setWidgetResizable(True)
+        self.side_content.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.side_text_host = QWidget()
+        self.side_text_layout = QVBoxLayout(self.side_text_host)
+        self.side_text_layout.setContentsMargins(2, 2, 2, 2)
+        self.side_content.setWidget(self.side_text_host)
+        side_layout.addWidget(self.side_content, 1)
+        body.addWidget(self.side_panel, 1)
+        player_layout.addLayout(body, 1)
+
+        controls = QHBoxLayout()
+        self.previous_video_button = QPushButton("⏮")
+        self.previous_video_button.setToolTip("Video sebelumnya")
+        self.previous_video_button.clicked.connect(lambda: self.play_index(self.current_index - 1))
+        self.play_pause_button = QPushButton("Ⅱ")
+        self.play_pause_button.setToolTip("Jeda / lanjut")
+        self.play_pause_button.clicked.connect(lambda: self.mpv_command(["cycle", "pause"]))
+        self.next_video_button = QPushButton("⏭")
+        self.next_video_button.setToolTip("Video berikutnya")
+        self.next_video_button.clicked.connect(lambda: self.play_index(self.current_index + 1))
+        self.stop_button = QPushButton("■")
+        self.stop_button.setToolTip("Stop dan kembali")
+        self.stop_button.clicked.connect(self.back_to_results)
+        self.subtitle_box = QComboBox()
+        self.subtitle_box.setMinimumWidth(115)
+        self.subtitle_box.addItem("Subtitle: Off", None)
+        self.subtitle_box.currentIndexChanged.connect(self.select_subtitle)
+        controls.addWidget(self.previous_video_button)
+        controls.addWidget(self.play_pause_button)
+        controls.addWidget(self.next_video_button)
+        controls.addWidget(self.stop_button)
+        controls.addStretch(1)
+        controls.addWidget(QLabel("CC"))
+        controls.addWidget(self.subtitle_box)
+        player_layout.addLayout(controls)
+        self.player_status = QLabel("Menyiapkan pemutar…")
+        self.player_status.setObjectName("hint")
+        player_layout.addWidget(self.player_status)
+        self.pages.addWidget(self.player_page)
 
         self.apply_safe_area()
         self.query.setFocus()
         QApplication.instance().installEventFilter(self)
-        self.setTabOrder(self.query, self.keyboard_button)
-        self.setTabOrder(self.keyboard_button, self.search_button)
-        self.setTabOrder(self.search_button, self.quality)
-        self.setTabOrder(self.quality, self.play_button)
-        self.setTabOrder(self.play_button, self.stop_button)
+        self.show_side_panel("playlist")
 
     def apply_safe_area(self):
         m, w, h = self.safe_margins, max(1, self.width()), max(1, self.height())
@@ -311,40 +314,12 @@ class MainWindow(QMainWindow):
         self.refresh_card_columns()
 
     def refresh_card_columns(self):
+        if not hasattr(self, "scroll"):
+            return
         columns = 2 if self.scroll.viewport().width() < 980 else 3
         for i, card in enumerate(self.cards):
             self.cards_grid.removeWidget(card)
             self.cards_grid.addWidget(card, i // columns, i % columns)
-
-    def set_keyboard_visible(self, visible):
-        visible = bool(visible)
-        if visible == self.keyboard_open:
-            return
-        self.keyboard_open = visible
-        self.keyboard_button.setText("⌨ TUTUP" if visible else "⌨ KEYBOARD")
-        if self.keyboard_animation is not None:
-            self.keyboard_animation.stop()
-        self.keyboard.setVisible(True)
-        animation = QPropertyAnimation(self.keyboard, b"maximumHeight", self)
-        animation.setDuration(220)
-        animation.setStartValue(self.keyboard.maximumHeight())
-        animation.setEndValue(205 if visible else 0)
-        animation.setEasingCurve(QEasingCurve.OutCubic if visible else QEasingCurve.InCubic)
-        if not visible:
-            animation.finished.connect(lambda: self.keyboard.setVisible(False))
-        self.keyboard_animation = animation
-        animation.start()
-
-    def finish_keyboard(self):
-        self.set_keyboard_visible(False)
-        self.query.setFocus()
-
-    def toggle_keyboard(self):
-        self.set_keyboard_visible(not self.keyboard_open)
-        if self.keyboard_open and self.keyboard.buttons:
-            self.keyboard.buttons[0].setFocus()
-        else:
-            self.query.setFocus()
 
     def clear_cards(self):
         for card in self.cards:
@@ -352,6 +327,7 @@ class MainWindow(QMainWindow):
             card.deleteLater()
         self.cards.clear()
         self.thumbnail_cards.clear()
+        self.thumbnail_queue.clear()
 
     def search(self):
         term = self.query.text().strip()
@@ -362,16 +338,14 @@ class MainWindow(QMainWindow):
         if not shutil.which(YTDLP):
             QMessageBox.critical(self, APP_NAME, f"yt-dlp tidak ditemukan: {YTDLP}")
             return
-        if self.keyboard_open:
-            self.set_keyboard_visible(False)
         if self.search_process and self.search_process.state() != QProcess.NotRunning:
             self.search_process.kill()
         self.search_button.setEnabled(False)
         self.clear_cards()
         self.results = []
-        self.play_button.setEnabled(False)
+        self.current_page = 0
         self.status.setText("Mencari video YouTube…")
-        target = term if term.startswith(("http://", "https://")) else f"ytsearch12:{term}"
+        target = term if term.startswith(("http://", "https://")) else f"ytsearch60:{term}"
         process = QProcess(self)
         self.search_process = process
         process.setProgram(YTDLP)
@@ -394,7 +368,7 @@ class MainWindow(QMainWindow):
         if exit_code != 0 or not raw.strip():
             self.status.setText("Pencarian gagal. Periksa koneksi / yt-dlp.")
             if err.strip():
-                QMessageBox.warning(self, APP_NAME, err[-1400:])
+                QMessageBox.warning(self, APP_NAME, err[-1200:])
             return
         try:
             data = json.loads(raw)
@@ -404,135 +378,301 @@ class MainWindow(QMainWindow):
                 url = video_url(entry)
                 if not url:
                     continue
-                title = entry.get("title") or "Video tanpa judul"
-                channel = entry.get("channel") or entry.get("uploader") or entry.get("artist") or "YouTube"
                 duration = entry.get("duration")
                 duration_text = f"{int(duration)//60}:{int(duration)%60:02d}" if duration else ""
-                result = {"url": url, "title": title, "channel": channel,
-                          "thumbnail": entry.get("thumbnail"), "duration": duration_text}
-                self.results.append(result)
-                card = VideoCard(len(self.results)-1, title, channel, duration_text, self.cards_host)
-                card.setMinimumHeight(245)
-                card.on_activate = self.play_selected
-                card.installEventFilter(self)
-                self.cards.append(card)
-                if result["thumbnail"]:
-                    self.thumbnail_cards[result["thumbnail"]] = card
-                    request = QNetworkRequest(QUrl(result["thumbnail"]))
-                    request.setTransferTimeout(12000)
-                    reply = self.network.get(request)
-                    reply.finished.connect(lambda r=reply, u=result["thumbnail"]: self.thumbnail_loaded(r, u))
-            self.refresh_card_columns()
+                self.results.append({
+                    "url": url, "title": entry.get("title") or "Video tanpa judul",
+                    "channel": entry.get("channel") or entry.get("uploader") or "YouTube",
+                    "thumbnail": thumbnail_url(entry), "duration": duration_text,
+                    "description": entry.get("description") or "",
+                })
+            self.render_page()
+            self.status.setText(f"{len(self.results)} video ditemukan.")
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             self.status.setText(f"Format hasil tidak dikenali: {exc}")
-            return
-        self.status.setText(f"{len(self.results)} hasil ditemukan. Pilih thumbnail untuk memutar.")
-        self.play_button.setEnabled(bool(self.results))
+
+    def render_page(self):
+        self.clear_cards()
+        total_pages = max(1, (len(self.results) + self.page_size - 1) // self.page_size)
+        self.current_page = max(0, min(self.current_page, total_pages - 1))
+        start = self.current_page * self.page_size
+        end = min(len(self.results), start + self.page_size)
+        columns = 2
+        for idx in range(start, end):
+            result = self.results[idx]
+            card = VideoCard(idx, result["title"], result["channel"], result["duration"], self.cards_host)
+            card.setMinimumHeight(190)
+            card.on_activate = self.play_index
+            card.installEventFilter(self)
+            self.cards.append(card)
+            self.cards_grid.addWidget(card, (idx-start)//columns, (idx-start)%columns)
+            if result["thumbnail"]:
+                self.thumbnail_cards[result["thumbnail"]] = card
+                self.thumbnail_queue.append((result["thumbnail"], card))
+        self.page_label.setText(f"{self.current_page + 1} / {total_pages}")
+        self.prev_page_button.setEnabled(self.current_page > 0)
+        self.next_page_button.setEnabled(self.current_page + 1 < total_pages)
+        self.results_heading.setText(f"HASIL VIDEO  •  {start + 1 if end else 0}–{end} dari {len(self.results)}")
+        self.refresh_card_columns()
+        self.load_next_thumbnail()
         if self.cards:
             self.cards[0].setFocus()
 
-    def thumbnail_loaded(self, reply, url):
-        card = self.thumbnail_cards.get(url)
-        if card is not None and reply.error() == reply.NetworkError.NoError:
+    def load_next_thumbnail(self):
+        while self.thumbnail_active < 3 and self.thumbnail_queue:
+            url, card = self.thumbnail_queue.pop(0)
+            if card is None:
+                continue
+            request = QNetworkRequest(QUrl(url))
+            request.setTransferTimeout(6000)
+            reply = self.network.get(request)
+            self.thumbnail_active += 1
+            self.thumbnail_replies.add(reply)
+            reply.finished.connect(lambda r=reply, u=url, c=card: self.thumbnail_loaded(r, u, c))
+
+    def thumbnail_loaded(self, reply, url, card):
+        self.thumbnail_active = max(0, self.thumbnail_active - 1)
+        self.thumbnail_replies.discard(reply)
+        if card in self.cards and reply.error() == reply.NetworkError.NoError:
             pixmap = QPixmap()
             if pixmap.loadFromData(reply.readAll()):
                 card.set_thumbnail(pixmap)
         reply.deleteLater()
+        self.load_next_thumbnail()
 
-    def play_selected(self, index=None):
+    def change_page_size(self, value):
+        self.page_size = int(value)
+        self.current_page = 0
+        if self.results:
+            self.render_page()
+
+    def change_page(self, delta):
+        target = self.current_page + delta
+        total = max(1, (len(self.results) + self.page_size - 1) // self.page_size)
+        if 0 <= target < total:
+            self.current_page = target
+            self.render_page()
+
+    def play_index(self, index):
         if not self.results:
-            self.status.setText("Cari dan pilih video terlebih dahulu.")
             return
-        if index is None:
-            focus = QApplication.focusWidget()
-            index = getattr(focus, "index", 0)
-        index = max(0, min(int(index), len(self.results)-1))
+        index = max(0, min(int(index), len(self.results) - 1))
+        self.current_index = index
         video = self.results[index]
+        self.player_title.setText(video["title"])
+        self.player_status.setText("Menghubungkan ke YouTube…")
+        self.subtitle_box.blockSignals(True)
+        self.subtitle_box.clear()
+        self.subtitle_box.addItem("Subtitle: Off", None)
+        self.subtitle_box.blockSignals(False)
+        self.show_side_panel("playlist")
+        self.populate_playlist()
+        self.pages.setCurrentWidget(self.player_page)
+        self.video_surface.winId()  # Force creation of a native X11 child window.
+        if self.player_process and self.player_process.state() != QProcess.NotRunning:
+            self.player_process.kill()
         if not shutil.which(MPV):
             QMessageBox.critical(self, APP_NAME, f"mpv tidak ditemukan: {MPV}")
+            self.back_to_results()
             return
-        if self.player_process and self.player_process.state() != QProcess.NotRunning:
-            self.player_process.terminate()
+        self.ipc_path = f"/tmp/roxy-youtube-tv-{os.getpid()}-{index}.sock"
+        try:
+            Path(self.ipc_path).unlink(missing_ok=True)
+        except OSError:
+            pass
         process = QProcess(self)
         self.player_process = process
+        args = ["--no-osc", "--force-window=yes", f"--wid={int(self.video_surface.winId())}",
+                f"--input-ipc-server={self.ipc_path}",
+                f"--ytdl-format={QUALITY_FORMATS[self.quality.currentText()]}",
+                "--keep-open=no", video["url"]]
         process.setProgram(MPV)
-        process.setArguments(["--force-window=yes",
-            f"--ytdl-format={QUALITY_FORMATS[self.quality.currentText()]}", video["url"]])
-        process.started.connect(lambda p=process: self.player_started(p, video["title"]))
+        process.setArguments(args)
+        process.started.connect(lambda p=process: self.player_started(p))
         process.finished.connect(lambda code, _status, p=process: self.player_finished(p, code))
         process.errorOccurred.connect(lambda _err, p=process: self.player_error(p))
         process.start()
-        self.status.setText(f"Menyiapkan: {video['title']}")
+        self.fetch_metadata(index)
+        self.player_status.setText("Menyiapkan video…")
 
-    def player_started(self, process, title):
+    def player_started(self, process):
         if process is self.player_process:
+            self.player_status.setText("Pemutar aktif. Menunggu video…")
             self.stop_button.setEnabled(True)
-            self.status.setText(f"Sedang diputar: {title} • STOP untuk kembali.")
 
     def player_finished(self, process, exit_code):
         if process is self.player_process:
             self.stop_button.setEnabled(False)
-            self.status.setText("Pemutaran selesai. Hasil pencarian tetap tersedia.")
+            if self.pages.currentWidget() == self.player_page:
+                self.player_status.setText("Pemutaran selesai.")
         process.deleteLater()
 
     def player_error(self, process):
         if process is self.player_process:
             self.stop_button.setEnabled(False)
-            self.status.setText("MPV tidak dapat dijalankan. Periksa instalasi MPV.")
+            self.player_status.setText("MPV gagal dijalankan.")
 
-    def stop_player(self):
+    def fetch_metadata(self, index):
+        if self.metadata_process and self.metadata_process.state() != QProcess.NotRunning:
+            self.metadata_process.kill()
+        process = QProcess(self)
+        self.metadata_process = process
+        process.setProgram(YTDLP)
+        process.setArguments(["--no-warnings", "--skip-download", "--no-playlist",
+                              "--dump-single-json", self.results[index]["url"]])
+        process.finished.connect(lambda code, _status, p=process, i=index: self.metadata_finished(p, i, code))
+        process.start()
+
+    def metadata_finished(self, process, index, exit_code):
+        if process is not self.metadata_process or index != self.current_index or exit_code != 0:
+            return
+        try:
+            data = json.loads(bytes(process.readAllStandardOutput()).decode("utf-8", "replace"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return
+        description = data.get("description") or self.results[index].get("description") or "Deskripsi tidak tersedia."
+        self.results[index]["description"] = description
+        self.show_side_panel("description", description)
+        tracks = []
+        for source, label in ((data.get("subtitles") or {}, "Tersedia"),
+                              (data.get("automatic_captions") or {}, "Otomatis")):
+            for lang, entries in source.items():
+                for item in entries:
+                    url = item.get("url")
+                    ext = item.get("ext", "")
+                    if url and ext in ("vtt", "srv3", "ttml", "json3"):
+                        tracks.append({"lang": lang, "name": item.get("name") or lang,
+                                       "source": label, "url": url})
+                        break
+        self.subtitle_box.blockSignals(True)
+        self.subtitle_box.clear()
+        self.subtitle_box.addItem("Subtitle: Off", None)
+        # Indonesian first, then other languages.
+        tracks.sort(key=lambda x: (0 if x["lang"] == "id" or x["lang"].startswith("id-") else 1,
+                                   x["source"] != "Tersedia", x["lang"]))
+        for track in tracks:
+            self.subtitle_box.addItem(f"{track['name']} ({track['source']})", track)
+        self.subtitle_box.blockSignals(False)
+        if tracks:
+            self.player_status.setText("Subtitle tersedia. Pilih bahasa melalui CC.")
+        else:
+            self.player_status.setText("Subtitle tidak tersedia untuk video ini.")
+
+    def select_subtitle(self, index):
+        track = self.subtitle_box.itemData(index)
+        if not track:
+            self.mpv_command(["set_property", "sid", "no"])
+            return
+        self.mpv_command(["sub-add", track["url"], "select", track["name"]])
+
+    def mpv_command(self, command):
+        socket = QLocalSocket(self)
+        socket.connectToServer(self.ipc_path)
+        if socket.waitForConnected(250):
+            payload = json.dumps({"command": command}).encode("utf-8") + b"\n"
+            socket.write(payload)
+            socket.flush()
+            socket.disconnectFromServer()
+        socket.deleteLater()
+
+    def populate_playlist(self):
+        self.clear_side_content()
+        for idx, item in enumerate(self.results):
+            button = QPushButton(("▶  " if idx == self.current_index else "") + item["title"])
+            button.setToolTip(item["title"])
+            button.setStyleSheet("text-align:left;padding:6px;font-size:11px;")
+            button.clicked.connect(lambda checked=False, i=idx: self.play_index(i))
+            self.side_text_layout.addWidget(button)
+        self.side_text_layout.addStretch(1)
+
+    def show_side_panel(self, mode, description=None):
+        self.clear_side_content()
+        if mode == "description":
+            text = description if description is not None else (
+                self.results[self.current_index].get("description", "") if self.results else "")
+            label = QLabel(text or "Memuat deskripsi…")
+            label.setWordWrap(True)
+            label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            label.setStyleSheet("font-size:11px;color:#e4e9ef;border:0;")
+            self.side_text_layout.addWidget(label)
+        else:
+            self.populate_playlist()
+        self.playlist_button.setStyleSheet("background:#40536b;" if mode == "playlist" else "")
+        self.description_button.setStyleSheet("background:#40536b;" if mode == "description" else "")
+
+    def clear_side_content(self):
+        while self.side_text_layout.count():
+            item = self.side_text_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def back_to_results(self):
         if self.player_process and self.player_process.state() != QProcess.NotRunning:
-            self.status.setText("Menghentikan pemutaran…")
             self.player_process.terminate()
-            self.stop_button.setEnabled(False)
+            QTimer.singleShot(700, lambda p=self.player_process: p.kill()
+                              if p and p.state() != QProcess.NotRunning else None)
+        self.stop_button.setEnabled(False)
+        self.pages.setCurrentWidget(self.search_page)
+        if self.cards:
+            self.cards[0].setFocus()
+        else:
+            self.query.setFocus()
 
     def eventFilter(self, watched, event):
         if event.type() == QEvent.KeyPress and self.isActiveWindow():
             key, focus = event.key(), QApplication.focusWidget()
-            if key in (Qt.Key_Escape, Qt.Key_Back):
-                if self.keyboard_open:
-                    self.set_keyboard_visible(False)
-                self.query.setFocus()
-                return True
-            if focus in self.cards:
-                idx = self.cards.index(focus)
-                cols = 2 if self.scroll.viewport().width() < 980 else 3
-                if key == Qt.Key_Right and idx + 1 < len(self.cards):
-                    self.cards[idx+1].setFocus(); return True
-                if key == Qt.Key_Left:
-                    (self.cards[idx-1] if idx % cols else self.query).setFocus(); return True
-                if key == Qt.Key_Down and idx + cols < len(self.cards):
-                    self.cards[idx+cols].setFocus(); return True
-                if key == Qt.Key_Up:
-                    (self.cards[idx-cols] if idx >= cols else self.query).setFocus(); return True
-                if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
-                    self.play_selected(idx); return True
-            if focus is self.query and key == Qt.Key_Down:
-                target = self.keyboard.buttons[0] if self.keyboard_open and self.keyboard.buttons else (
-                    self.cards[0] if self.cards else self.quality)
-                target.setFocus(); return True
-            if focus is self.keyboard_button and key == Qt.Key_Left:
-                self.query.setFocus(); return True
-            if focus is self.keyboard_button and key == Qt.Key_Right:
-                self.search_button.setFocus(); return True
-            if focus is self.search_button and key == Qt.Key_Left:
-                self.keyboard_button.setFocus(); return True
-            if focus is self.search_button and key == Qt.Key_Down and self.cards:
-                self.cards[0].setFocus(); return True
+            if self.pages.currentWidget() == self.player_page:
+                if key in (Qt.Key_Escape, Qt.Key_Back):
+                    self.back_to_results()
+                    return True
+                if key == Qt.Key_Left and focus is self.subtitle_box:
+                    self.stop_button.setFocus()
+                    return True
+                if key == Qt.Key_Right and focus is self.stop_button:
+                    self.subtitle_box.setFocus()
+                    return True
+                if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select) and focus is self.video_surface:
+                    self.mpv_command(["cycle", "pause"])
+                    return True
+            elif self.pages.currentWidget() == self.search_page:
+                if key in (Qt.Key_Escape, Qt.Key_Back):
+                    self.query.setFocus()
+                    return True
+                if focus in self.cards:
+                    idx = self.cards.index(focus)
+                    cols = 2
+                    if key == Qt.Key_Right and idx + 1 < len(self.cards):
+                        self.cards[idx+1].setFocus(); return True
+                    if key == Qt.Key_Left and idx % cols:
+                        self.cards[idx-1].setFocus(); return True
+                    if key == Qt.Key_Down and idx + cols < len(self.cards):
+                        self.cards[idx+cols].setFocus(); return True
+                    if key == Qt.Key_Up and idx >= cols:
+                        self.cards[idx-cols].setFocus(); return True
+                    if key == Qt.Key_Up and idx < cols:
+                        self.query.setFocus(); return True
+                    if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
+                        self.play_index(idx); return True
+                if focus is self.query and key == Qt.Key_Down:
+                    if self.cards:
+                        self.cards[0].setFocus()
+                        return True
         return super().eventFilter(watched, event)
 
     def keyPressEvent(self, event):
-        if event.key() in (Qt.Key_Escape, Qt.Key_Back):
-            if self.keyboard_open:
-                self.set_keyboard_visible(False)
-            self.query.setFocus()
+        if event.key() in (Qt.Key_Escape, Qt.Key_Back) and self.pages.currentWidget() == self.player_page:
+            self.back_to_results()
             return
         super().keyPressEvent(event)
 
     def closeEvent(self, event):
-        for process in (self.search_process, self.player_process):
+        for process in (self.search_process, self.player_process, self.metadata_process):
             if process and process.state() != QProcess.NotRunning:
                 process.terminate()
+        try:
+            Path(self.ipc_path).unlink(missing_ok=True)
+        except OSError:
+            pass
         super().closeEvent(event)
 
 
