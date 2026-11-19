@@ -1040,7 +1040,7 @@ class MainWindow(QMainWindow):
         index = max(0, min(int(index), len(self.results) - 1))
         self.background_playback = bool(background)
         self.mini_player.setVisible(self.background_playback)
-        self.window_controls_widget.setVisible(not self.background_playback)
+        self.window_controls_widget.setVisible(self.background_playback)
         self.current_index = index
         self.manual_stop = False
         self.selected_subtitle_track = None
@@ -1068,9 +1068,11 @@ class MainWindow(QMainWindow):
         if self.background_playback:
             self.pages.setCurrentWidget(self.search_page)
             self.mini_player.show()
+            self.window_controls_widget.show()
         else:
             self.pages.setCurrentWidget(self.player_page)
             self.mini_player.hide()
+            self.window_controls_widget.hide()
         self.video_surface.winId()
         # Keep keyboard focus in Roxy when MPV is embedded in the native surface.
         self.play_pause_button.setFocus(Qt.OtherFocusReason)
@@ -1281,14 +1283,17 @@ class MainWindow(QMainWindow):
                                   self.play_index(i, background=bg)
                                   if self.current_index == finished_index
                                   and self.player_process is None else None)
-            elif self.pages.currentWidget() == self.player_page:
+            else:
                 self.background_playback = False
                 self.mini_player.hide()
-                self.window_controls_widget.show()
-                self.player_status.setText(
-                    "Pemutaran selesai." if finished_naturally
-                    else "Pemutaran selesai atau stream terputus."
+                self.window_controls_widget.setVisible(
+                    self.pages.currentWidget() == self.search_page
                 )
+                if self.pages.currentWidget() == self.player_page:
+                    self.player_status.setText(
+                        "Pemutaran selesai." if finished_naturally
+                        else "Pemutaran selesai atau stream terputus."
+                    )
         try:
             process.deleteLater()
         except RuntimeError:
@@ -1301,7 +1306,9 @@ class MainWindow(QMainWindow):
             self.player_process = None
             self.background_playback = False
             self.mini_player.hide()
-            self.window_controls_widget.show()
+            self.window_controls_widget.setVisible(
+                self.pages.currentWidget() == self.search_page
+            )
             self.set_playback_controls_enabled(False)
             self.player_status.setText("MPV gagal dijalankan.")
         try:
@@ -1666,6 +1673,16 @@ class MainWindow(QMainWindow):
                     return True
                 if self.fullscreen_controls_visible:
                     self.fullscreen_hide_timer.start(1000)
+                    if key == Qt.Key_Up and focus is self.seek_slider:
+                        self.hide_fullscreen_controls()
+                        return True
+                    if key == Qt.Key_Down and focus in (
+                        self.previous_video_button, self.rewind_button, self.play_pause_button,
+                        self.fast_forward_button, self.next_video_button, self.stop_button,
+                        self.quality, self.subtitle_box, self.fullscreen_button
+                    ):
+                        self.hide_fullscreen_controls()
+                        return True
                 elif key == Qt.Key_Down:
                     self.show_fullscreen_controls(focus_slider=True)
                     return True
