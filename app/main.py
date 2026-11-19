@@ -9,7 +9,7 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDi
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea,
-    QProgressBar, QSizePolicy, QSlider, QStackedWidget, QVBoxLayout, QWidget,
+    QProgressBar, QSizePolicy, QSlider, QStackedWidget, QStyle, QVBoxLayout, QWidget,
 )
 
 APP_NAME = "YouTube Roxy"
@@ -403,21 +403,29 @@ class MainWindow(QMainWindow):
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(4, 7, 4, 7)
         sidebar_layout.setSpacing(5)
-        self.nav_buttons, self.nav_modes = [], []
-        for icon, label, mode in (
-            ("⌂", "Beranda", "home"), ("⌕", "Cari", "search"),
-            ("🔥", "Trending", "trending"), ("▣", "Video", "videos"),
-            ("◷", "Riwayat", "history"), ("♡", "Favorit", "favorites"),
-            ("☷", "Playlist", "playlists"), ("⚙", "Pengaturan", "settings"),
-        ):
-            button = QPushButton(f"{icon}  {label}")
+        self.nav_buttons, self.nav_modes, self.nav_labels = [], [], []
+        nav_items = (
+            ("Beranda", "home", QStyle.SP_DirHomeIcon),
+            ("Cari", "search", QStyle.SP_FileDialogContentsView),
+            ("Trending", "trending", QStyle.SP_BrowserReload),
+            ("Video", "videos", QStyle.SP_MediaPlay),
+            ("Riwayat", "history", QStyle.SP_FileDialogInfoView),
+            ("Favorit", "favorites", QStyle.SP_DialogApplyButton),
+            ("Playlist", "playlists", QStyle.SP_FileDialogListView),
+            ("Pengaturan", "settings", QStyle.SP_FileDialogDetailedView),
+        )
+        for label, mode, icon_type in nav_items:
+            button = QPushButton(label)
+            button.setIcon(self.style().standardIcon(icon_type))
             button.setMinimumHeight(34)
             button.setFocusPolicy(Qt.StrongFocus)
             button.setStyleSheet("text-align:left;padding:5px 7px;font-size:12px;")
+            button.setToolTip(label)
             button.clicked.connect(lambda checked=False, m=mode: self.select_section(m))
             sidebar_layout.addWidget(button)
             self.nav_buttons.append(button)
             self.nav_modes.append(mode)
+            self.nav_labels.append(label)
         sidebar_layout.addStretch(1)
         search_shell.addWidget(self.sidebar)
         content = QWidget()
@@ -427,8 +435,8 @@ class MainWindow(QMainWindow):
         search_shell.addWidget(content, 1)
         self.feed_mode = "home"
         header = QHBoxLayout()
-        logo = QLabel("▶")
-        logo.setStyleSheet("color:#ff0033;font-size:22px;font-weight:900;")
+        logo = QLabel()
+        logo.setPixmap(self.style().standardIcon(QStyle.SP_MediaPlay).pixmap(22, 22))
         brand = QLabel("YouTube Roxy")
         brand.setObjectName("brand")
         brand.setMaximumWidth(112)
@@ -464,11 +472,12 @@ class MainWindow(QMainWindow):
             "QProgressBar::chunk{background:#ff334f;border-radius:3px;}"
         )
         mini_controls.addWidget(self.mini_progress)
-        self.mini_rewind_button = QPushButton("−10")
+        self.mini_rewind_button = QPushButton("-10")
         self.mini_rewind_button.setFixedWidth(38)
         self.mini_rewind_button.setToolTip("Mundur 10 detik")
         self.mini_rewind_button.clicked.connect(lambda: self.seek_relative(-10))
-        self.mini_play_pause_button = QPushButton("Ⅱ")
+        self.mini_play_pause_button = QPushButton()
+        self.mini_play_pause_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
         self.mini_play_pause_button.setFixedWidth(34)
         self.mini_play_pause_button.setToolTip("Jeda / lanjut")
         self.mini_play_pause_button.clicked.connect(self.toggle_play_pause)
@@ -476,7 +485,8 @@ class MainWindow(QMainWindow):
         self.mini_fast_forward_button.setFixedWidth(38)
         self.mini_fast_forward_button.setToolTip("Maju 10 detik")
         self.mini_fast_forward_button.clicked.connect(lambda: self.seek_relative(10))
-        self.mini_stop_button = QPushButton("■")
+        self.mini_stop_button = QPushButton()
+        self.mini_stop_button.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
         self.mini_stop_button.setFixedWidth(30)
         self.mini_stop_button.setToolTip("Stop playback")
         self.mini_stop_button.clicked.connect(self.stop_playback)
@@ -493,11 +503,13 @@ class MainWindow(QMainWindow):
         window_controls = QHBoxLayout(self.window_controls_widget)
         window_controls.setContentsMargins(0, 0, 0, 0)
         window_controls.setSpacing(3)
-        self.minimize_button = QPushButton("—")
+        self.minimize_button = QPushButton()
+        self.minimize_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMinButton))
         self.minimize_button.setFixedSize(30, 28)
         self.minimize_button.setToolTip("Minimize aplikasi")
         self.minimize_button.clicked.connect(self.showMinimized)
-        self.close_button = QPushButton("×")
+        self.close_button = QPushButton()
+        self.close_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarCloseButton))
         self.close_button.setFixedSize(30, 28)
         self.close_button.setToolTip("Tutup aplikasi dan hentikan playback")
         self.close_button.clicked.connect(self.close)
@@ -510,10 +522,10 @@ class MainWindow(QMainWindow):
         self.query = QLineEdit()
         self.query.setPlaceholderText("Cari video atau tempel URL YouTube…")
         self.query.returnPressed.connect(self.search)
-        self.keyboard_button = QPushButton("⌨")
+        self.keyboard_button = QPushButton("KEY")
         self.keyboard_button.setToolTip("Buka keyboard layar")
         self.keyboard_button.clicked.connect(self.toggle_keyboard)
-        self.search_button = QPushButton("⌕")
+        self.search_button = QPushButton("Search")
         self.search_button.setToolTip("Cari video")
         self.search_button.clicked.connect(self.search)
         search_row.addWidget(self.query, 1)
@@ -584,7 +596,7 @@ class MainWindow(QMainWindow):
         self.player_title = QLabel("Pemutar YouTube")
         self.player_title.setObjectName("brand")
         self.player_title.setWordWrap(True)
-        self.back_button = QPushButton("‹")
+        self.back_button = QPushButton("Back")
         self.back_button.setToolTip("Kembali ke hasil")
         self.back_button.clicked.connect(self.back_to_results)
         player_header.addWidget(self.back_button)
@@ -621,10 +633,10 @@ class MainWindow(QMainWindow):
         side_layout.setContentsMargins(5, 4, 5, 4)
         side_layout.setSpacing(3)
         side_buttons = QHBoxLayout()
-        self.playlist_button = QPushButton("☷  Berikutnya")
+        self.playlist_button = QPushButton("Queue")
         self.playlist_button.setToolTip("Antrean video")
         self.playlist_button.clicked.connect(lambda: self.show_side_panel("playlist"))
-        self.description_button = QPushButton("≡  Deskripsi")
+        self.description_button = QPushButton("Description")
         self.description_button.setToolTip("Deskripsi video")
         self.description_button.clicked.connect(lambda: self.show_side_panel("description"))
         side_buttons.addWidget(self.playlist_button)
@@ -675,14 +687,16 @@ class MainWindow(QMainWindow):
         self.controls_widget = QWidget()
         controls = QHBoxLayout(self.controls_widget)
         controls.setContentsMargins(0, 0, 0, 0)
-        self.previous_video_button = QPushButton("⏮")
+        self.previous_video_button = QPushButton()
+        self.previous_video_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipBackward))
         self.previous_video_button.setToolTip("Video sebelumnya")
         self.previous_video_button.clicked.connect(lambda: self.play_index(self.current_index - 1))
-        self.rewind_button = QPushButton("−10")
+        self.rewind_button = QPushButton("-10")
         self.rewind_button.setFixedWidth(46)
         self.rewind_button.setToolTip("Mundur 10 detik")
         self.rewind_button.clicked.connect(lambda: self.seek_relative(-10))
-        self.play_pause_button = QPushButton("Ⅱ")
+        self.play_pause_button = QPushButton()
+        self.play_pause_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
         self.play_pause_button.setToolTip("Jeda / lanjut")
         self.play_pause_button.clicked.connect(self.toggle_play_pause)
         self.play_pause_button.setFocusPolicy(Qt.StrongFocus)
@@ -690,10 +704,12 @@ class MainWindow(QMainWindow):
         self.fast_forward_button.setFixedWidth(46)
         self.fast_forward_button.setToolTip("Maju 10 detik")
         self.fast_forward_button.clicked.connect(lambda: self.seek_relative(10))
-        self.next_video_button = QPushButton("⏭")
+        self.next_video_button = QPushButton()
+        self.next_video_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipForward))
         self.next_video_button.setToolTip("Video berikutnya")
         self.next_video_button.clicked.connect(lambda: self.play_index(self.current_index + 1))
-        self.stop_button = QPushButton("■")
+        self.stop_button = QPushButton()
+        self.stop_button.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
         self.stop_button.setToolTip("Stop playback")
         self.stop_button.clicked.connect(self.stop_playback)
         self.subtitle_box = QComboBox()
@@ -721,7 +737,7 @@ class MainWindow(QMainWindow):
         self.volume_slider.setFocusPolicy(Qt.StrongFocus)
         self.volume_slider.setToolTip("Volume")
         self.volume_slider.valueChanged.connect(self.change_volume)
-        controls.addWidget(QLabel("🔊"))
+        controls.addWidget(QLabel("VOL"))
         controls.addWidget(self.volume_slider)
         controls.addStretch(1)
         controls.addWidget(QLabel("Kualitas"))
@@ -812,14 +828,16 @@ class MainWindow(QMainWindow):
 
     def collapse_sidebar(self):
         self.sidebar.setFixedWidth(48)
-        for button, icon in zip(self.nav_buttons, ("⌂", "⌕", "🔥", "▣", "◷", "♡", "☷", "⚙")):
-            button.setText(icon)
+        for button, label in zip(self.nav_buttons, self.nav_labels):
+            button.setText("")
+            button.setToolTip(label)
+            button.setStyleSheet("padding:5px 2px;")
 
     def expand_sidebar(self):
         self.sidebar.setFixedWidth(150)
-        for button, icon, label in zip(self.nav_buttons, ("⌂", "⌕", "🔥", "▣", "◷", "♡", "☷", "⚙"),
-                                       ("Beranda", "Cari", "Trending", "Video", "Riwayat", "Favorit", "Playlist", "Pengaturan")):
-            button.setText(f"{icon}  {label}")
+        for button, label in zip(self.nav_buttons, self.nav_labels):
+            button.setText(label)
+            button.setStyleSheet("text-align:left;padding:5px 7px;font-size:12px;")
 
     def select_section(self, mode):
         self.set_active_nav(mode)
@@ -1050,7 +1068,7 @@ class MainWindow(QMainWindow):
         self.update_timeline(self.current_time_pos, self.duration_seconds)
         self.set_playback_controls_enabled(False)
         self.playback_paused = False
-        self.play_pause_button.setText("Ⅱ")
+        self.update_play_pause_icons()
         self.fallback_qualities = self.quality_fallbacks(self.quality.currentText())
         self.metadata_requested_index = None
         video = self.results[index]
@@ -1235,9 +1253,7 @@ class MainWindow(QMainWindow):
                     self.update_timeline(self.current_time_pos, self.duration_seconds)
                 elif name == "pause" and isinstance(value, bool):
                     self.playback_paused = value
-                    label = "▶" if value else "Ⅱ"
-                    self.play_pause_button.setText(label)
-                    self.mini_play_pause_button.setText(label)
+                    self.update_play_pause_icons()
 
     def schedule_metadata_after_start(self, index, process, delay_ms):
         if self.metadata_requested_index == index:
@@ -1421,14 +1437,18 @@ class MainWindow(QMainWindow):
         self.current_time_pos = target
         self.update_timeline(target, self.duration_seconds)
 
+    def update_play_pause_icons(self):
+        icon_type = QStyle.SP_MediaPlay if self.playback_paused else QStyle.SP_MediaPause
+        icon = self.style().standardIcon(icon_type)
+        self.play_pause_button.setIcon(icon)
+        self.mini_play_pause_button.setIcon(icon)
+
     def toggle_play_pause(self):
         if not self.process_is_running(self.player_process):
             return
         self.mpv_command(["cycle", "pause"])
         self.playback_paused = not self.playback_paused
-        label = "▶" if self.playback_paused else "Ⅱ"
-        self.play_pause_button.setText(label)
-        self.mini_play_pause_button.setText(label)
+        self.update_play_pause_icons()
 
     def set_mini_controls_enabled(self, enabled):
         for widget in (self.mini_rewind_button, self.mini_play_pause_button,
