@@ -31,7 +31,7 @@ python3 app/main.py
 or:
 
 ```bash
-./scripts/run.sh
+sh scripts/run.sh
 ```
 
 Set `ROXY_YT_DLP` or `ROXY_MPV` to override executable paths if needed.
