@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Roxy YouTube TV - lightweight PySide6 frontend for yt-dlp + mpv."""
+"""Roxy YouTube TV - PySide6 frontend for yt-dlp + mpv."""
 from __future__ import annotations
 
 import json
@@ -7,8 +7,11 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
-from PySide6.QtCore import Qt, QProcess
+from PySide6.QtCore import Qt, QProcess, QUrl
+from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QVBoxLayout, QWidget,
@@ -28,14 +31,27 @@ QUALITY_FORMATS = {
 
 
 def safe_area_margins():
-    values = {"margin_left": 5, "margin_right": 5, "margin_top": 5, "margin_bottom": 5}
+    defaults = {"margin_left": 5, "margin_right": 5, "margin_top": 5, "margin_bottom": 5}
     try:
         data = json.loads(SAFE_AREA_FILE.read_text(encoding="utf-8"))
-        for key in values:
-            values[key] = max(0.0, min(15.0, float(data.get(key, values[key]))))
+        for key in defaults:
+            defaults[key] = max(0.0, min(15.0, float(data.get(key, defaults[key]))))
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         pass
-    return values
+    return defaults
+
+
+def video_url(entry):
+    """Normalize flat-playlist IDs and relative YouTube URLs."""
+    candidate = entry.get("webpage_url") or entry.get("url")
+    video_id = entry.get("id")
+    if candidate and candidate.startswith(("http://", "https://")):
+        return candidate
+    if video_id:
+        return f"https://www.youtube.com/watch?v={video_id}"
+    if candidate and len(candidate) >= 8 and "/" not in candidate:
+        return f"https://www.youtube.com/watch?v={candidate}"
+    return None
 
 
 class MainWindow(QMainWindow):
@@ -47,33 +63,32 @@ class MainWindow(QMainWindow):
         self.results = []
         self.search_process = None
         self.player_process = None
-        m = safe_area_margins()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(
-            int(960 * m["margin_left"] / 100), int(720 * m["margin_top"] / 100),
-            int(960 * m["margin_right"] / 100), int(720 * m["margin_bottom"] / 100),
-        )
-        layout.setSpacing(14)
+        self.network = QNetworkAccessManager(self)
+        self.thumbnail_items = {}
+        self.root_layout = QVBoxLayout()
+        self.root_layout.setSpacing(12)
         self.setStyleSheet("""
             QMainWindow, QWidget { background:#101318; color:#f4f6f8; font-family:Sans; }
-            QLabel#brand { color:#ff4545; font-size:28px; font-weight:800; }
+            QLabel#brand { color:#ff4545; font-size:27px; font-weight:800; }
             QLabel#hint { color:#aeb8c5; font-size:14px; }
             QLineEdit,QComboBox { background:#202733; color:white; border:2px solid #465366;
-                border-radius:8px; padding:12px; font-size:18px; min-height:28px; }
-            QPushButton { background:#d92727; color:white; border:0; border-radius:8px;
-                padding:12px 20px; font-size:17px; font-weight:700; }
-            QPushButton:focus,QLineEdit:focus,QComboBox:focus,QListWidget:focus { border:3px solid #ffd166; }
+                border-radius:8px; padding:10px; font-size:17px; min-height:28px; }
+            QPushButton { background:#d92727; color:white; border:2px solid transparent;
+                border-radius:8px; padding:10px 18px; font-size:17px; font-weight:700; }
+            QPushButton:focus,QLineEdit:focus,QComboBox:focus,QListWidget:focus {
+                border:3px solid #ffd166; }
             QListWidget { background:#171d26; border:1px solid #394454; border-radius:10px;
-                padding:8px; font-size:17px; }
-            QListWidget::item { padding:14px; border-bottom:1px solid #303a49; }
+                padding:6px; font-size:16px; }
+            QListWidget::item { padding:9px; border-bottom:1px solid #303a49; min-height:66px; }
             QListWidget::item:selected { background:#35465d; color:white; }
         """)
+
         brand = QLabel("ROXY  /  YouTube")
         brand.setObjectName("brand")
-        layout.addWidget(brand)
-        hint = QLabel("Cari video YouTube • pilih hasil • putar dengan MPV")
+        self.root_layout.addWidget(brand)
+        hint = QLabel("Cari video YouTube • navigasi dengan tombol arah / remote")
         hint.setObjectName("hint")
-        layout.addWidget(hint)
+        self.root_layout.addWidget(hint)
 
         search_row = QHBoxLayout()
         self.query = QLineEdit()
@@ -83,31 +98,51 @@ class MainWindow(QMainWindow):
         self.search_button.clicked.connect(self.search)
         search_row.addWidget(self.query, 1)
         search_row.addWidget(self.search_button)
-        layout.addLayout(search_row)
+        self.root_layout.addLayout(search_row)
 
         quality_row = QHBoxLayout()
         quality_row.addWidget(QLabel("Kualitas video:"))
         self.quality = QComboBox()
         self.quality.addItems(list(QUALITY_FORMATS))
+        self.quality.setMaximumWidth(180)
         quality_row.addWidget(self.quality)
         quality_row.addStretch(1)
-        layout.addLayout(quality_row)
+        self.root_layout.addLayout(quality_row)
 
         self.list = QListWidget()
+        self.list.setIconSize(self.list.iconSize())
         self.list.itemActivated.connect(self.play_selected)
-        layout.addWidget(self.list, 1)
+        self.root_layout.addWidget(self.list, 1)
+
         bottom = QHBoxLayout()
         self.play_button = QPushButton("PUTAR")
         self.play_button.clicked.connect(self.play_selected)
         self.status = QLabel("Siap. Masukkan pencarian atau URL video.")
         self.status.setObjectName("hint")
+        self.status.setWordWrap(True)
         bottom.addWidget(self.play_button)
         bottom.addWidget(self.status, 1)
-        layout.addLayout(bottom)
+        self.root_layout.addLayout(bottom)
+
         root = QWidget()
-        root.setLayout(layout)
+        root.setLayout(self.root_layout)
         self.setCentralWidget(root)
+        self.apply_safe_area()
         self.query.setFocus()
+
+    def apply_safe_area(self):
+        m = safe_area_margins()
+        w, h = max(1, self.width()), max(1, self.height())
+        self.root_layout.setContentsMargins(
+            round(w * m["margin_left"] / 100),
+            round(h * m["margin_top"] / 100),
+            round(w * m["margin_right"] / 100),
+            round(h * m["margin_bottom"] / 100),
+        )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.apply_safe_area()
 
     def search(self):
         term = self.query.text().strip()
@@ -117,21 +152,33 @@ class MainWindow(QMainWindow):
         if not shutil.which(YTDLP):
             QMessageBox.critical(self, APP_NAME, f"yt-dlp tidak ditemukan: {YTDLP}")
             return
+        if self.search_process and self.search_process.state() != QProcess.NotRunning:
+            self.search_process.kill()
         self.search_button.setEnabled(False)
         self.list.clear()
         self.results = []
-        self.status.setText("Mencari…")
+        self.thumbnail_items.clear()
+        self.status.setText("Mencari video…")
         target = term if term.startswith(("http://", "https://")) else f"ytsearch12:{term}"
-        self.search_process = QProcess(self)
-        self.search_process.setProgram(YTDLP)
-        self.search_process.setArguments(["--no-warnings", "--flat-playlist", "--dump-single-json", target])
-        self.search_process.finished.connect(self.search_finished)
-        self.search_process.start()
+        process = QProcess(self)
+        self.search_process = process
+        process.setProgram(YTDLP)
+        process.setArguments(["--no-warnings", "--flat-playlist", "--dump-single-json", target])
+        process.finished.connect(lambda code, status, p=process: self.search_finished(p, code, status))
+        process.errorOccurred.connect(lambda _err, p=process: self.search_error(p))
+        process.start()
 
-    def search_finished(self, exit_code, _exit_status):
+    def search_error(self, process):
+        if process is self.search_process:
+            self.search_button.setEnabled(True)
+            self.status.setText("Tidak dapat menjalankan yt-dlp. Periksa instalasi dan PATH.")
+
+    def search_finished(self, process, exit_code, _exit_status):
+        raw = bytes(process.readAllStandardOutput()).decode("utf-8", "replace")
+        err = bytes(process.readAllStandardError()).decode("utf-8", "replace")
+        if process is not self.search_process:
+            return
         self.search_button.setEnabled(True)
-        raw = bytes(self.search_process.readAllStandardOutput()).decode("utf-8", "replace")
-        err = bytes(self.search_process.readAllStandardError()).decode("utf-8", "replace")
         if exit_code != 0 or not raw.strip():
             self.status.setText("Pencarian gagal. Periksa koneksi / yt-dlp.")
             if err.strip():
@@ -139,23 +186,28 @@ class MainWindow(QMainWindow):
             return
         try:
             data = json.loads(raw)
-            for entry in (data.get("entries") or [data]):
+            entries = data.get("entries") or [data]
+            for entry in entries:
                 if not entry:
                     continue
-                video_id = entry.get("id")
-                url = entry.get("url") or entry.get("webpage_url")
-                if not url and video_id:
-                    url = f"https://www.youtube.com/watch?v={video_id}"
+                url = video_url(entry)
                 if not url:
                     continue
                 title = entry.get("title") or "Video tanpa judul"
                 channel = entry.get("channel") or entry.get("uploader") or "YouTube"
                 duration = entry.get("duration")
                 duration_text = f"  •  {int(duration)//60}:{int(duration)%60:02d}" if duration else ""
-                self.results.append({"url": url, "title": title})
+                result = {"url": url, "title": title, "thumbnail": entry.get("thumbnail")}
+                self.results.append(result)
                 item = QListWidgetItem(f"{title}\n{channel}{duration_text}")
                 item.setData(Qt.UserRole, len(self.results) - 1)
                 self.list.addItem(item)
+                if result["thumbnail"]:
+                    self.thumbnail_items[result["thumbnail"]] = item
+                    request = QNetworkRequest(QUrl(result["thumbnail"]))
+                    request.setTransferTimeout(12000)
+                    reply = self.network.get(request)
+                    reply.finished.connect(lambda r=reply, u=result["thumbnail"]: self.thumbnail_loaded(r, u))
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             self.status.setText(f"Format hasil tidak dikenali: {exc}")
             return
@@ -164,27 +216,63 @@ class MainWindow(QMainWindow):
             self.list.setCurrentRow(0)
             self.list.setFocus()
 
+    def thumbnail_loaded(self, reply, url):
+        item = self.thumbnail_items.get(url)
+        if item is not None and reply.error() == reply.NetworkError.NoError:
+            pixmap = QPixmap()
+            if pixmap.loadFromData(reply.readAll()):
+                item.setIcon(QIcon(pixmap.scaled(112, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
+        reply.deleteLater()
+
     def play_selected(self):
         item = self.list.currentItem()
         if item is None:
+            self.status.setText("Pilih video terlebih dahulu.")
             return
         video = self.results[item.data(Qt.UserRole)]
         if not shutil.which(MPV):
             QMessageBox.critical(self, APP_NAME, f"mpv tidak ditemukan: {MPV}")
             return
+        if self.player_process and self.player_process.state() != QProcess.NotRunning:
+            self.player_process.terminate()
         fmt = QUALITY_FORMATS[self.quality.currentText()]
-        self.player_process = QProcess(self)
-        self.player_process.setProgram(MPV)
-        self.player_process.setArguments(["--force-window=yes", f"--ytdl-format={fmt}", video["url"]])
-        self.player_process.start()
+        process = QProcess(self)
+        self.player_process = process
+        process.setProgram(MPV)
+        process.setArguments(["--force-window=yes", f"--ytdl-format={fmt}", video["url"]])
+        process.errorOccurred.connect(lambda _err: self.status.setText("MPV gagal dijalankan."))
+        process.start()
         self.status.setText(f"Membuka: {video['title']}")
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape:
+        key = event.key()
+        if key == Qt.Key_Escape:
             self.query.setFocus()
             return
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and self.list.hasFocus():
-            self.play_selected()
+        if key == Qt.Key_Down and self.query.hasFocus():
+            self.list.setFocus()
+            if self.list.count() and self.list.currentRow() < 0:
+                self.list.setCurrentRow(0)
+            return
+        if key == Qt.Key_Up and self.list.hasFocus() and self.list.currentRow() == 0:
+            self.quality.setFocus()
+            return
+        if key == Qt.Key_Down and self.quality.hasFocus():
+            self.list.setFocus()
+            if self.list.count():
+                self.list.setCurrentRow(0)
+            return
+        if key == Qt.Key_Right and self.query.hasFocus():
+            self.search_button.setFocus()
+            return
+        if key == Qt.Key_Left and self.search_button.hasFocus():
+            self.query.setFocus()
+            return
+        if key == Qt.Key_Right and self.quality.hasFocus():
+            self.play_button.setFocus()
+            return
+        if key == Qt.Key_Left and self.play_button.hasFocus():
+            self.quality.setFocus()
             return
         super().keyPressEvent(event)
 
