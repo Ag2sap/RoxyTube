@@ -18,8 +18,12 @@ SAFE_AREA_FILE = CONFIG_DIR / "roxy-display" / "safe-area.json"
 CACHE_DIR = Path.home() / ".cache" / "roxy-youtube-tv" / "thumbnails"
 YTDLP = os.environ.get("ROXY_YT_DLP", "yt-dlp")
 MPV = os.environ.get("ROXY_MPV", "mpv")
-QUALITY_FORMATS = {"Auto": "best", "360p": "best[height<=360]",
-                   "480p": "best[height<=480]", "720p": "best[height<=720]"}
+QUALITY_FORMATS = {
+    "Auto": "bestvideo+bestaudio/best",
+    "360p": "bestvideo[height<=360]+bestaudio/best[height<=360]",
+    "480p": "bestvideo[height<=480]+bestaudio/best[height<=480]",
+    "720p": "bestvideo[height<=720]+bestaudio/best[height<=720]",
+}
 
 
 def safe_area_margins():
