@@ -356,6 +356,8 @@ class MainWindow(QMainWindow):
         self.slider_dragging = False
         self.playback_paused = False
         self.playback_started = False
+        self.manual_stop = False
+        self.selected_subtitle_track = None
         self.fallback_qualities = []
         self.setStyleSheet("""
             QMainWindow, QWidget { background:#101318; color:#f4f6f8; font-family:Sans; }
@@ -603,8 +605,8 @@ class MainWindow(QMainWindow):
         self.next_video_button.setToolTip("Video berikutnya")
         self.next_video_button.clicked.connect(lambda: self.play_index(self.current_index + 1))
         self.stop_button = QPushButton("■")
-        self.stop_button.setToolTip("Stop dan kembali")
-        self.stop_button.clicked.connect(self.back_to_results)
+        self.stop_button.setToolTip("Stop playback")
+        self.stop_button.clicked.connect(self.stop_playback)
         self.subtitle_box = QComboBox()
         self.subtitle_box.setMinimumWidth(105)
         self.subtitle_box.addItem("Subtitle: Off", None)
@@ -944,6 +946,8 @@ class MainWindow(QMainWindow):
             return
         index = max(0, min(int(index), len(self.results) - 1))
         self.current_index = index
+        self.manual_stop = False
+        self.selected_subtitle_track = None
         self.current_time_pos = max(0.0, float(start_position or 0.0))
         self.duration_seconds = float(self.results[index].get("duration_seconds") or 0)
         self.update_timeline(self.current_time_pos, self.duration_seconds)
@@ -1003,6 +1007,8 @@ class MainWindow(QMainWindow):
                 "--keep-open=no"]
         if self.current_time_pos > 0.5:
             args.append(f"--start={self.current_time_pos:.2f}")
+        if self.playback_paused:
+            args.append("--pause")
         args.append(self.results[self.current_index]["url"])
         process.setProgram(MPV)
         process.setArguments(args)
@@ -1094,6 +1100,8 @@ class MainWindow(QMainWindow):
         ):
             sock.write(json.dumps({"command": command}).encode("utf-8") + b"\n")
         sock.flush()
+        if self.selected_subtitle_track:
+            QTimer.singleShot(350, self.apply_selected_subtitle)
 
     def read_mpv_events(self, sock, index, process):
         if sock is not self.mpv_event_socket:
@@ -1156,12 +1164,22 @@ class MainWindow(QMainWindow):
         if process is self.player_process:
             if self.retry_lower_quality(process, "Stream gagal dibuka."):
                 return
-            # Do not keep a Python reference after Qt schedules this QProcess
-            # for deletion; later UI refreshes may otherwise query a dead wrapper.
+            finished_naturally = (
+                exit_code == 0 and self.playback_started and not self.manual_stop
+            )
+            finished_index = self.current_index
             self.player_process = None
             self.set_playback_controls_enabled(False)
-            if self.pages.currentWidget() == self.player_page:
-                self.player_status.setText("Pemutaran selesai atau stream terputus.")
+            if finished_naturally and finished_index + 1 < len(self.results):
+                self.player_status.setText("Video selesai. Memutar video berikutnya…")
+                QTimer.singleShot(250, lambda i=finished_index + 1:
+                                  self.play_index(i) if self.current_index == finished_index
+                                  and self.player_process is None else None)
+            elif self.pages.currentWidget() == self.player_page:
+                self.player_status.setText(
+                    "Pemutaran selesai." if finished_naturally
+                    else "Pemutaran selesai atau stream terputus."
+                )
         try:
             process.deleteLater()
         except RuntimeError:
@@ -1227,6 +1245,7 @@ class MainWindow(QMainWindow):
         if tracks:
             self.player_status.setText("Subtitle tersedia. Pilih bahasa melalui CC.")
         else:
+            self.selected_subtitle_track = None
             self.player_status.setText("Subtitle tidak tersedia untuk video ini.")
 
     @staticmethod
@@ -1297,10 +1316,25 @@ class MainWindow(QMainWindow):
 
     def select_subtitle(self, index):
         track = self.subtitle_box.itemData(index)
+        self.selected_subtitle_track = track
         if not track:
             self.mpv_command(["set_property", "sid", "no"])
+            self.mpv_command(["set_property", "sub-visibility", False])
             return
-        self.mpv_command(["sub-add", track["url"], "select", track["name"]])
+        self.apply_selected_subtitle()
+
+    def apply_selected_subtitle(self):
+        """Apply the chosen external track to the currently active MPV session."""
+        track = self.selected_subtitle_track
+        if not track or not self.process_is_running(self.player_process):
+            return
+        if not self.mpv_command([
+            "sub-add", track["url"], "select", track["name"], track["lang"]
+        ]):
+            self.player_status.setText("Subtitle belum dapat diterapkan ke MPV.")
+            return
+        self.mpv_command(["set_property", "sub-visibility", True])
+        self.player_status.setText(f"Subtitle aktif: {track['name']}")
 
     def mpv_command(self, command):
         if not self.process_is_running(self.player_process):
@@ -1371,12 +1405,28 @@ class MainWindow(QMainWindow):
             if item.widget():
                 item.widget().deleteLater()
 
+    def stop_playback(self):
+        self.manual_stop = True
+        self.fallback_qualities.clear()
+        process = self.player_process
+        self.player_process = None
+        if self.process_is_running(process):
+            process.terminate()
+            QTimer.singleShot(700, lambda p=process: p.kill()
+                              if self.process_is_running(p) else None)
+        self.selected_subtitle_track = None
+        self.current_time_pos = 0.0
+        self.playback_started = False
+        self.set_playback_controls_enabled(False)
+        self.slider_dragging = False
+        self.pages.setCurrentWidget(self.search_page)
+        if self.cards:
+            self.cards[0].setFocus()
+        else:
+            self.query.setFocus()
+
     def back_to_results(self):
         self.fallback_qualities.clear()
-        if self.process_is_running(self.player_process):
-            self.player_process.terminate()
-            QTimer.singleShot(700, lambda p=self.player_process: p.kill()
-                              if self.process_is_running(p) else None)
         self.set_playback_controls_enabled(False)
         self.slider_dragging = False
         self.pages.setCurrentWidget(self.search_page)
