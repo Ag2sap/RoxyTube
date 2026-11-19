@@ -1935,6 +1935,9 @@ class MainWindow(QMainWindow):
         if event.type() == QEvent.FocusIn and watched in getattr(self, "cards", ()):
             QTimer.singleShot(0, lambda card=watched:
                               self.scroll.ensureWidgetVisible(card, 0, 12))
+        if event.type() == QEvent.FocusIn and watched in getattr(self, "playlist_items", ()):
+            QTimer.singleShot(0, lambda item=watched:
+                              self.side_content.ensureWidgetVisible(item, 0, 8))
         if self.is_playback_fullscreen and event.type() == QEvent.MouseMove:
             try:
                 point = watched.mapTo(self.player_page, event.position().toPoint())
@@ -2045,13 +2048,21 @@ class MainWindow(QMainWindow):
                         if item_index > 0:
                             self.playlist_items[item_index - 1].setFocus()
                         else:
-                            self.playlist_button.setFocus()
+                            bar = self.side_content.verticalScrollBar()
+                            if bar.value() > bar.minimum():
+                                bar.setValue(max(bar.minimum(), bar.value() - max(bar.singleStep(), 48)))
+                            else:
+                                self.playlist_button.setFocus()
                         return True
                     if key == Qt.Key_Down:
                         if item_index + 1 < len(self.playlist_items):
                             self.playlist_items[item_index + 1].setFocus()
                         else:
-                            self.side_content.setFocus()
+                            bar = self.side_content.verticalScrollBar()
+                            if bar.value() < bar.maximum():
+                                bar.setValue(min(bar.maximum(), bar.value() + max(bar.singleStep(), 48)))
+                            else:
+                                self.side_content.setFocus()
                         return True
                     if key == Qt.Key_Left:
                         self.playlist_button.setFocus(); return True
@@ -2195,6 +2206,28 @@ class MainWindow(QMainWindow):
                     self.expand_sidebar()
                     self.nav_buttons[1].setFocus()
                     return True
+                if focus is self.query and key == Qt.Key_Right:
+                    self.keyboard_button.setFocus(); return True
+                if focus is self.keyboard_button:
+                    if key == Qt.Key_Left:
+                        self.query.setFocus(); return True
+                    if key == Qt.Key_Right:
+                        self.search_button.setFocus(); return True
+                    if key == Qt.Key_Down:
+                        if self.keyboard_open and self.keyboard.buttons:
+                            self.keyboard.buttons[0].setFocus()
+                        elif self.cards:
+                            self.cards[0].setFocus()
+                        return True
+                    if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
+                        self.toggle_keyboard(); return True
+                if focus is self.search_button:
+                    if key == Qt.Key_Left:
+                        self.keyboard_button.setFocus(); return True
+                    if key == Qt.Key_Down and self.cards:
+                        self.cards[0].setFocus(); return True
+                    if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
+                        self.search(); return True
                 if focus is self.query and key == Qt.Key_Down:
                     if self.keyboard_open and self.keyboard.buttons:
                         self.keyboard.buttons[0].setFocus()
@@ -2216,6 +2249,39 @@ class MainWindow(QMainWindow):
             self.query.setFocus()
             return
         super().keyPressEvent(event)
+
+    def minimize_window(self):
+        if self.isFullScreen() or self.is_playback_fullscreen:
+            self._activation_state = "fullscreen"
+        elif self.isMaximized():
+            self._activation_state = "maximized"
+        else:
+            self._activation_state = "normal"
+        self.showMinimized()
+
+    def restore_window(self):
+        if self._activation_state == "fullscreen" or self.is_playback_fullscreen:
+            self.showFullScreen()
+        elif self._activation_state == "maximized":
+            self.showMaximized()
+        else:
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.WindowStateChange:
+            try:
+                old_state = event.oldState()
+                if old_state & Qt.WindowFullScreen:
+                    self._activation_state = "fullscreen"
+                elif old_state & Qt.WindowMaximized:
+                    self._activation_state = "maximized"
+                elif not old_state & Qt.WindowMinimized:
+                    self._activation_state = "normal"
+            except (AttributeError, TypeError):
+                pass
+        super().changeEvent(event)
 
     def closeEvent(self, event):
         if self.process_is_running(self.player_process):
@@ -2273,11 +2339,14 @@ def main():
             command = bytes(client.readAll()).strip()
             if command == b"activate":
                 if window.isMinimized():
-                    window.showNormal()
+                    window.restore_window()
                 else:
-                    window.show()
-                window.raise_()
-                window.activateWindow()
+                    if window.is_playback_fullscreen:
+                        window.showFullScreen()
+                    else:
+                        window.show()
+                    window.raise_()
+                    window.activateWindow()
             client.disconnectFromServer()
             client.deleteLater()
 
