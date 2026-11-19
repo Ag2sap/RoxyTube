@@ -365,6 +365,7 @@ class MainWindow(QMainWindow):
         self.fullscreen_hide_timer.timeout.connect(self.hide_fullscreen_controls)
         self.fallback_qualities = []
         self.background_playback = False
+        self.playlist_items = []
         self.mini_title_text = ""
         self.mini_title_offset = 0
         self.mini_title_timer = QTimer(self)
@@ -1533,12 +1534,15 @@ class MainWindow(QMainWindow):
 
     def populate_playlist(self):
         self.clear_side_content()
+        self.playlist_items = []
         for idx, item in enumerate(self.results):
             button = QPushButton((">  " if idx == self.current_index else "") + item["title"])
             button.setToolTip(item["title"])
+            button.setFocusPolicy(Qt.StrongFocus)
             button.setStyleSheet("text-align:left;padding:6px;font-size:11px;")
             button.clicked.connect(lambda checked=False, i=idx: self.play_index(i))
             self.side_text_layout.addWidget(button)
+            self.playlist_items.append(button)
         self.side_text_layout.addStretch(1)
 
     def show_side_panel(self, mode, description=None):
@@ -1557,6 +1561,7 @@ class MainWindow(QMainWindow):
         self.description_button.setStyleSheet("background:#40536b;" if mode == "description" else "")
 
     def clear_side_content(self):
+        self.playlist_items = []
         while self.side_text_layout.count():
             item = self.side_text_layout.takeAt(0)
             if item.widget():
@@ -1791,6 +1796,24 @@ class MainWindow(QMainWindow):
                         self.seek_slider.setFocus(); return True
                     if key == Qt.Key_Down:
                         self.playlist_button.setFocus(); return True
+                if focus in self.playlist_items:
+                    item_index = self.playlist_items.index(focus)
+                    if key == Qt.Key_Up:
+                        if item_index > 0:
+                            self.playlist_items[item_index - 1].setFocus()
+                        else:
+                            self.playlist_button.setFocus()
+                        return True
+                    if key == Qt.Key_Down:
+                        if item_index + 1 < len(self.playlist_items):
+                            self.playlist_items[item_index + 1].setFocus()
+                        else:
+                            self.side_content.setFocus()
+                        return True
+                    if key == Qt.Key_Left:
+                        self.playlist_button.setFocus(); return True
+                    if key == Qt.Key_Right:
+                        self.description_button.setFocus(); return True
                 if focus in (self.side_content, self.side_content.viewport()):
                     scroll_bar = self.side_content.verticalScrollBar()
                     if key == Qt.Key_Up:
