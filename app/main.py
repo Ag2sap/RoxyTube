@@ -330,6 +330,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(560, 420)
         self.setMaximumSize(900, 675)
         self.results, self.cards = [], []
+        self.playback_queue = []
         self.search_process = self.player_process = self.metadata_process = None
         self.current_index = 0
         self.current_page = 0
@@ -691,7 +692,9 @@ class MainWindow(QMainWindow):
         self.previous_video_button = QPushButton()
         self.previous_video_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipBackward))
         self.previous_video_button.setToolTip("Video sebelumnya")
-        self.previous_video_button.clicked.connect(lambda: self.play_index(self.current_index - 1))
+        self.previous_video_button.clicked.connect(
+            lambda: self.play_index(self.current_index - 1, queue=self.playback_queue)
+        )
         self.rewind_button = QPushButton("-10")
         self.rewind_button.setFixedWidth(46)
         self.rewind_button.setToolTip("Mundur 10 detik")
@@ -708,7 +711,9 @@ class MainWindow(QMainWindow):
         self.next_video_button = QPushButton()
         self.next_video_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipForward))
         self.next_video_button.setToolTip("Video berikutnya")
-        self.next_video_button.clicked.connect(lambda: self.play_index(self.current_index + 1))
+        self.next_video_button.clicked.connect(
+            lambda: self.play_index(self.current_index + 1, queue=self.playback_queue)
+        )
         self.stop_button = QPushButton()
         self.stop_button.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
         self.stop_button.setToolTip("Stop playback")
@@ -1053,10 +1058,15 @@ class MainWindow(QMainWindow):
             return ["Auto"]
         return []
 
-    def play_index(self, index, start_position=0.0, background=False):
-        if not self.results:
+    def play_index(self, index, start_position=0.0, background=False, queue=None):
+        if queue is None:
+            queue = list(self.results)
+        else:
+            queue = list(queue)
+        if not queue:
             return
-        index = max(0, min(int(index), len(self.results) - 1))
+        self.playback_queue = queue
+        index = max(0, min(int(index), len(self.playback_queue) - 1))
         self.background_playback = bool(background)
         self.mini_player.setVisible(self.background_playback)
         self.window_controls_widget.setVisible(self.background_playback)
@@ -1072,7 +1082,7 @@ class MainWindow(QMainWindow):
         self.update_play_pause_icons()
         self.fallback_qualities = self.quality_fallbacks(self.quality.currentText())
         self.metadata_requested_index = None
-        video = self.results[index]
+        video = self.playback_queue[index]
         self.player_title.setText(video["title"])
         self.set_mini_title(video["title"])
         channel = video.get("channel") or "YouTube"
@@ -1133,7 +1143,7 @@ class MainWindow(QMainWindow):
             args.append(f"--start={self.current_time_pos:.2f}")
         if self.playback_paused:
             args.append("--pause")
-        args.append(self.results[self.current_index]["url"])
+        args.append(self.playback_queue[self.current_index]["url"])
         process.setProgram(MPV)
         process.setArguments(args)
         process.started.connect(lambda p=process: self.player_started(p))
@@ -1144,7 +1154,7 @@ class MainWindow(QMainWindow):
         self.player_status.setText(f"Mencoba kualitas {self.quality.currentText()}…")
 
     def change_quality(self, quality):
-        if self.pages.currentWidget() != self.player_page or not self.results:
+        if self.pages.currentWidget() != self.player_page or not self.playback_queue:
             return
         if not self.process_is_running(self.player_process):
             return
@@ -1297,11 +1307,11 @@ class MainWindow(QMainWindow):
             self.player_process = None
             self.set_playback_controls_enabled(False)
             self.set_mini_controls_enabled(False)
-            if finished_naturally and finished_index + 1 < len(self.results):
+            if finished_naturally and finished_index + 1 < len(self.playback_queue):
                 self.player_status.setText("Video selesai. Memutar video berikutnya…")
                 keep_background = self.background_playback
                 QTimer.singleShot(250, lambda i=finished_index + 1, bg=keep_background:
-                                  self.play_index(i, background=bg)
+                                  self.play_index(i, background=bg, queue=self.playback_queue)
                                   if self.current_index == finished_index
                                   and self.player_process is None else None)
             else:
@@ -1345,7 +1355,7 @@ class MainWindow(QMainWindow):
         self.metadata_process = process
         process.setProgram(YTDLP)
         process.setArguments(["--no-warnings", "--skip-download", "--no-playlist",
-                              "--dump-single-json", self.results[index]["url"]])
+                              "--dump-single-json", self.playback_queue[index]["url"]])
         process.finished.connect(lambda code, _status, p=process, i=index: self.metadata_finished(p, i, code))
         process.start()
 
@@ -1358,10 +1368,10 @@ class MainWindow(QMainWindow):
             return
         if data.get("duration") is not None:
             self.duration_seconds = max(0.0, float(data["duration"]))
-            self.results[index]["duration_seconds"] = self.duration_seconds
+            self.playback_queue[index]["duration_seconds"] = self.duration_seconds
             self.update_timeline(self.current_time_pos, self.duration_seconds)
-        description = data.get("description") or self.results[index].get("description") or "Deskripsi tidak tersedia."
-        self.results[index]["description"] = description
+        description = data.get("description") or self.playback_queue[index].get("description") or "Deskripsi tidak tersedia."
+        self.playback_queue[index]["description"] = description
         self.show_side_panel("description", description)
         tracks = []
         for source, label in ((data.get("subtitles") or {}, "Tersedia"),
@@ -1466,7 +1476,9 @@ class MainWindow(QMainWindow):
                        self.fullscreen_button):
             widget.setEnabled(bool(enabled))
         self.previous_video_button.setEnabled(bool(enabled) and self.current_index > 0)
-        self.next_video_button.setEnabled(bool(enabled) and self.current_index + 1 < len(self.results))
+        self.next_video_button.setEnabled(
+            bool(enabled) and self.current_index + 1 < len(self.playback_queue)
+        )
         self.stop_button.setEnabled(bool(enabled))
 
     def change_volume(self, value):
@@ -1536,7 +1548,7 @@ class MainWindow(QMainWindow):
     def populate_playlist(self):
         self.clear_side_content()
         self.playlist_items = []
-        for idx, item in enumerate(self.results):
+        for idx, item in enumerate(self.playback_queue):
             button = QPushButton((">  " if idx == self.current_index else "") + item["title"])
             button.setToolTip(item["title"])
             button.setFocusPolicy(Qt.StrongFocus)
@@ -1550,7 +1562,7 @@ class MainWindow(QMainWindow):
         self.clear_side_content()
         if mode == "description":
             text = description if description is not None else (
-                self.results[self.current_index].get("description", "") if self.results else "")
+                self.playback_queue[self.current_index].get("description", "") if self.playback_queue else "")
             label = QLabel(text or "Memuat deskripsi…")
             label.setWordWrap(True)
             label.setTextInteractionFlags(Qt.TextSelectableByMouse)
