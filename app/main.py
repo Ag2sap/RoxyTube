@@ -3,7 +3,7 @@
 from __future__ import annotations
 import json, os, shutil, sys
 from pathlib import Path
-from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer
+from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDiskCache, QLocalSocket
 from PySide6.QtWidgets import (
@@ -55,6 +55,118 @@ def thumbnail_url(entry):
                                    abs((x.get("width") or 320) - 320)))
         return usable[0]["url"]
     return entry.get("thumbnail")
+
+
+class TvKeyboard(QWidget):
+    def __init__(self, target, on_finish, parent=None):
+        super().__init__(parent)
+        self.target, self.on_finish = target, on_finish
+        self.caps_locked, self.shift_once, self.symbol_mode = False, False, False
+        self.buttons = []
+        self.setObjectName("keyboardPanel")
+        self.setStyleSheet("""
+            QWidget#keyboardPanel { background:#151c26; border:1px solid #354253; border-radius:9px; }
+            QPushButton { background:#303d4e; color:#f7f8fa; border:2px solid #536176;
+                border-radius:6px; padding:3px 2px; font-size:14px; font-weight:700; min-height:27px; }
+            QPushButton:focus { background:#526781; border:3px solid #ffd166; }
+        """)
+        self.box = QVBoxLayout(self)
+        self.box.setContentsMargins(7, 7, 7, 7)
+        self.box.setSpacing(4)
+        self.build_keys()
+
+    def build_keys(self):
+        while self.box.count():
+            item = self.box.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.buttons = []
+        grid = QGridLayout()
+        grid.setSpacing(4)
+        for c in range(10):
+            grid.setColumnStretch(c, 1)
+
+        def key(label, row, col, span=1, callback=None):
+            button = QPushButton(label)
+            button.setFocusPolicy(Qt.StrongFocus)
+            button.clicked.connect(callback or (lambda checked=False, v=label: self.insert(v)))
+            grid.addWidget(button, row, col, 1, span)
+            self.buttons.append(button)
+            return button
+
+        if not self.symbol_mode:
+            for r, chars in enumerate(("1234567890", "QWERTYUIOP", "ASDFGHJKL")):
+                offset = 1 if r == 2 else 0
+                for c, char in enumerate(chars):
+                    shown = char.upper() if self.caps_locked or self.shift_once else char.lower()
+                    key(shown, r, c + offset)
+            key("SHIFT", 3, 0, 2, self.toggle_shift)
+            for c, char in enumerate("ZXCVBNM"):
+                shown = char.upper() if self.caps_locked or self.shift_once else char.lower()
+                key(shown, 3, c + 2)
+            key("⌫", 3, 9, callback=self.backspace)
+            key("?123", 4, 0, 2, self.toggle_symbols)
+            key(",", 4, 2)
+            key("SPASI", 4, 3, 4, lambda: self.insert(" "))
+            key(".", 4, 7)
+            key("CAPS", 4, 8, callback=self.toggle_caps)
+            key("SELESAI", 4, 9, callback=self.finish)
+        else:
+            for r, chars in enumerate(("1234567890", "!@#$%^&*()", "[]{}<>?/+=")):
+                for c, char in enumerate(chars):
+                    key(char, r, c)
+            key("ABC", 3, 0, 2, self.toggle_symbols)
+            key("-", 3, 2)
+            key("_", 3, 3)
+            key(":", 3, 4)
+            key(";", 3, 5)
+            key("'", 3, 6)
+            key('"', 3, 7)
+            key("⌫", 3, 8, 2, self.backspace)
+            key("KOSONGKAN", 4, 0, 2, self.clear_text)
+            key(",", 4, 2)
+            key("SPASI", 4, 3, 3, lambda: self.insert(" "))
+            key(".", 4, 6)
+            key("CAPS", 4, 7, callback=self.toggle_caps)
+            key("SELESAI", 4, 8, 2, self.finish)
+        self.box.addLayout(grid)
+        if self.buttons:
+            self.buttons[0].setFocus()
+
+    def insert(self, value):
+        if len(value) == 1 and value.isalpha():
+            value = value.upper() if (self.caps_locked or self.shift_once) else value.lower()
+            self.shift_once = False
+            self.build_keys()
+        pos = self.target.cursorPosition()
+        self.target.setText(self.target.text()[:pos] + value + self.target.text()[pos:])
+        self.target.setCursorPosition(pos + len(value))
+
+    def backspace(self):
+        pos = self.target.cursorPosition()
+        if pos:
+            self.target.setText(self.target.text()[:pos - 1] + self.target.text()[pos:])
+            self.target.setCursorPosition(pos - 1)
+
+    def clear_text(self):
+        self.target.clear()
+
+    def toggle_caps(self):
+        self.caps_locked = not self.caps_locked
+        self.build_keys()
+
+    def toggle_shift(self):
+        self.shift_once = not self.shift_once
+        self.build_keys()
+
+    def toggle_symbols(self):
+        self.symbol_mode = not self.symbol_mode
+        self.build_keys()
+
+    def finish(self):
+        self.on_finish()
+
+
 
 
 class VideoCard(QFrame):
@@ -238,34 +350,13 @@ class MainWindow(QMainWindow):
         search_row.addWidget(self.search_button)
         self.root_layout.addLayout(search_row)
 
-        self.keyboard_widget = QFrame()
-        self.keyboard_widget.setStyleSheet("QFrame{background:#171e28;border:1px solid #354253;border-radius:7px;}")
-        keyboard_layout = QGridLayout(self.keyboard_widget)
-        keyboard_layout.setContentsMargins(5, 5, 5, 5)
-        keyboard_layout.setSpacing(3)
-        self.keyboard_keys = []
-        for row_index, chars in enumerate(("1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM")):
-            offset = 1 if row_index == 2 else (2 if row_index == 3 else 0)
-            for col_index, char in enumerate(chars):
-                key_button = QPushButton(char)
-                key_button.setFocusPolicy(Qt.StrongFocus)
-                key_button.setMaximumHeight(29)
-                key_button.clicked.connect(lambda checked=False, value=char: self.insert_key(value))
-                keyboard_layout.addWidget(key_button, row_index, col_index + offset)
-                self.keyboard_keys.append(key_button)
-        self.space_key = QPushButton("SPASI")
-        self.space_key.clicked.connect(lambda: self.insert_key(" "))
-        keyboard_layout.addWidget(self.space_key, 4, 2, 1, 4)
-        self.backspace_key = QPushButton("⌫")
-        self.backspace_key.setToolTip("Hapus satu karakter")
-        self.backspace_key.clicked.connect(self.backspace_query)
-        keyboard_layout.addWidget(self.backspace_key, 4, 6, 1, 2)
-        self.done_key = QPushButton("✓")
-        self.done_key.setToolTip("Tutup keyboard")
-        self.done_key.clicked.connect(self.toggle_keyboard)
-        keyboard_layout.addWidget(self.done_key, 4, 8, 1, 2)
-        self.keyboard_widget.setVisible(False)
-        self.root_layout.addWidget(self.keyboard_widget)
+        self.keyboard_open = False
+        self.keyboard_animation = None
+        self.keyboard = TvKeyboard(self.query, self.finish_keyboard, self)
+        self.keyboard_widget = self.keyboard
+        self.keyboard.setVisible(False)
+        self.keyboard.setMaximumHeight(0)
+        self.root_layout.addWidget(self.keyboard)
 
         options = QHBoxLayout()
         options.addWidget(QLabel("Video per halaman"))
@@ -421,24 +512,35 @@ class MainWindow(QMainWindow):
             self.cards_grid.removeWidget(card)
             self.cards_grid.addWidget(card, i // columns, i % columns)
 
+    def set_keyboard_visible(self, visible):
+        visible = bool(visible)
+        if visible == self.keyboard_open:
+            return
+        self.keyboard_open = visible
+        self.keyboard_button.setText("⌨ TUTUP" if visible else "⌨")
+        if self.keyboard_animation is not None:
+            self.keyboard_animation.stop()
+        self.keyboard.setVisible(True)
+        animation = QPropertyAnimation(self.keyboard, b"maximumHeight", self)
+        animation.setDuration(220)
+        animation.setStartValue(self.keyboard.maximumHeight())
+        animation.setEndValue(205 if visible else 0)
+        animation.setEasingCurve(QEasingCurve.OutCubic if visible else QEasingCurve.InCubic)
+        if not visible:
+            animation.finished.connect(lambda: self.keyboard.setVisible(False))
+        self.keyboard_animation = animation
+        animation.start()
+
+    def finish_keyboard(self):
+        self.set_keyboard_visible(False)
+        self.query.setFocus()
+
     def toggle_keyboard(self):
-        visible = not self.keyboard_widget.isVisible()
-        self.keyboard_widget.setVisible(visible)
-        if visible and self.keyboard_keys:
-            self.keyboard_keys[0].setFocus()
+        self.set_keyboard_visible(not self.keyboard_open)
+        if self.keyboard_open and self.keyboard.buttons:
+            self.keyboard.buttons[0].setFocus()
         else:
             self.query.setFocus()
-
-    def insert_key(self, value):
-        pos = self.query.cursorPosition()
-        self.query.setText(self.query.text()[:pos] + value + self.query.text()[pos:])
-        self.query.setCursorPosition(pos + len(value))
-
-    def backspace_query(self):
-        pos = self.query.cursorPosition()
-        if pos:
-            self.query.setText(self.query.text()[:pos - 1] + self.query.text()[pos:])
-            self.query.setCursorPosition(pos - 1)
 
     def clear_cards(self):
         for card in self.cards:
@@ -971,8 +1073,8 @@ class MainWindow(QMainWindow):
                     return True
             elif self.pages.currentWidget() == self.search_page:
                 if key in (Qt.Key_Escape, Qt.Key_Back):
-                    if self.keyboard_widget.isVisible():
-                        self.keyboard_widget.setVisible(False)
+                    if self.keyboard_open:
+                        self.set_keyboard_visible(False)
                     self.query.setFocus()
                     return True
                 if focus in self.nav_buttons:
@@ -1015,8 +1117,8 @@ class MainWindow(QMainWindow):
                     self.nav_buttons[1].setFocus()
                     return True
                 if focus is self.query and key == Qt.Key_Down:
-                    if self.keyboard_widget.isVisible() and self.keyboard_keys:
-                        self.keyboard_keys[0].setFocus()
+                    if self.keyboard_open and self.keyboard.buttons:
+                        self.keyboard.buttons[0].setFocus()
                         return True
                     if self.cards:
                         self.cards[0].setFocus()
@@ -1027,8 +1129,8 @@ class MainWindow(QMainWindow):
         if event.key() in (Qt.Key_Escape, Qt.Key_Back) and self.pages.currentWidget() == self.player_page:
             self.back_to_results()
             return
-        if event.key() in (Qt.Key_Escape, Qt.Key_Back) and self.keyboard_widget.isVisible():
-            self.keyboard_widget.setVisible(False)
+        if event.key() in (Qt.Key_Escape, Qt.Key_Back) and self.keyboard_open:
+            self.set_keyboard_visible(False)
             self.query.setFocus()
             return
         super().keyPressEvent(event)
