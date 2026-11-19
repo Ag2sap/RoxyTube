@@ -572,6 +572,7 @@ class MainWindow(QMainWindow):
         self.mpv_event_buffer = ""
         sock.readyRead.connect(lambda s=sock, i=index, p=process:
                                self.read_mpv_events(s, i, p))
+        sock.connected.connect(lambda s=sock: self.mpv_event_connected(s))
         sock.connectToServer(self.ipc_path)
         QTimer.singleShot(350, lambda s=sock, i=index, p=process:
                           self.retry_mpv_event_connection(s, i, p))
@@ -582,17 +583,26 @@ class MainWindow(QMainWindow):
                 index != self.current_index):
             return
         if sock.state() == QLocalSocket.ConnectedState:
-            # Observe time-pos as a fallback if the initial playback event was missed.
-            sock.write(b'{"command":["observe_property",1,"time-pos"]}\\n')
-            sock.flush()
+            self.mpv_event_connected(sock)
             return
-        if sock.state() == QLocalSocket.UnconnectedState:
-            self.mpv_event_attempts += 1
+        self.mpv_event_attempts += 1
+        if self.mpv_event_attempts >= 20:
+            return
+        if sock.state() == QLocalSocket.ConnectingState:
+            QTimer.singleShot(250, lambda s=sock, i=index, p=process:
+                              self.retry_mpv_event_connection(s, i, p))
+        else:
             sock.abort()
             sock.deleteLater()
-            if self.mpv_event_attempts < 20:
-                QTimer.singleShot(250, lambda i=index, p=process:
-                                  self.connect_mpv_events(i, p))
+            QTimer.singleShot(250, lambda i=index, p=process:
+                              self.connect_mpv_events(i, p))
+
+    def mpv_event_connected(self, sock):
+        if sock is not self.mpv_event_socket:
+            return
+        # Observe time-pos as a fallback if the initial playback event was missed.
+        sock.write(b'{"command":["observe_property",1,"time-pos"]}\n')
+        sock.flush()
 
     def read_mpv_events(self, sock, index, process):
         if sock is not self.mpv_event_socket:
