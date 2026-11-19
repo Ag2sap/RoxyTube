@@ -552,6 +552,7 @@ class MainWindow(QMainWindow):
         mini_layout.addLayout(mini_controls)
         header.addStretch(1)
         header.addWidget(self.mini_player)
+        header.addSpacing(62)
         self.mini_player.hide()
 
         # Pin controls to the actual Home window corner, independent of sidebar width.
@@ -975,8 +976,8 @@ class MainWindow(QMainWindow):
         else:
             self.pages.setCurrentWidget(self.search_page)
             if mode == "search":
-                self.query.setFocus(Qt.OtherFocusReason)
-                self.status.setText("Masukkan kata pencarian atau URL YouTube.")
+                self.keyboard_button.setFocus(Qt.OtherFocusReason)
+                self.status.setText("Pilih KEY untuk membuka keyboard, atau pilih kolom teks untuk mengetik.")
             elif mode in ("home", "trending"):
                 self.load_feed(mode)
             else:
@@ -1029,7 +1030,7 @@ class MainWindow(QMainWindow):
         term = self.query.text().strip()
         if not term:
             self.status.setText("Masukkan kata pencarian atau URL.")
-            self.query.setFocus()
+            self.keyboard_button.setFocus(Qt.OtherFocusReason)
             return
         if not shutil.which(YTDLP):
             QMessageBox.critical(self, APP_NAME, f"yt-dlp tidak ditemukan: {YTDLP}")
@@ -2106,6 +2107,13 @@ class MainWindow(QMainWindow):
                 if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select) and focus is self.video_surface:
                     self.mpv_command(["cycle", "pause"])
                     return True
+            elif self.pages.currentWidget() == self.settings_page:
+                if focus is self.page_size_box and key == Qt.Key_Up:
+                    self.settings_back_button.setFocus(); return True
+                if focus is self.settings_back_button and key == Qt.Key_Down:
+                    self.page_size_box.setFocus(); return True
+                if focus is self.settings_back_button and key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
+                    self.return_from_settings(); return True
             elif self.pages.currentWidget() == self.search_page:
                 mini_buttons = (self.mini_rewind_button, self.mini_play_pause_button,
                                 self.mini_fast_forward_button, self.mini_stop_button)
@@ -2128,7 +2136,7 @@ class MainWindow(QMainWindow):
                         if self.cards:
                             self.cards[0].setFocus()
                         else:
-                            self.query.setFocus()
+                            self.keyboard_button.setFocus()
                         return True
                 if focus is self.minimize_button:
                     if key == Qt.Key_Right:
@@ -2137,16 +2145,16 @@ class MainWindow(QMainWindow):
                         (self.mini_title_button if self.mini_player.isVisible()
                          else self.query).setFocus(); return True
                     if key == Qt.Key_Down:
-                        self.query.setFocus(); return True
+                        self.keyboard_button.setFocus(); return True
                 if focus is self.close_button:
                     if key == Qt.Key_Left:
                         self.minimize_button.setFocus(); return True
                     if key == Qt.Key_Down:
-                        self.query.setFocus(); return True
+                        self.keyboard_button.setFocus(); return True
                 if key in (Qt.Key_Escape, Qt.Key_Back):
                     if self.keyboard_open:
                         self.set_keyboard_visible(False)
-                    self.query.setFocus()
+                    self.keyboard_button.setFocus()
                     return True
                 if focus in self.nav_buttons:
                     nav_index = self.nav_buttons.index(focus)
@@ -2157,7 +2165,7 @@ class MainWindow(QMainWindow):
                     if key == Qt.Key_Right:
                         self.collapse_sidebar()
                         if self.feed_mode == "search":
-                            self.query.setFocus()
+                            self.keyboard_button.setFocus()
                         elif self.cards:
                             self.cards[0].setFocus()
                         return True
@@ -2194,7 +2202,7 @@ class MainWindow(QMainWindow):
                             step = max(bar.singleStep(), 72)
                             bar.setValue(max(bar.minimum(), bar.value() - step))
                             return True
-                        self.query.setFocus()
+                        self.keyboard_button.setFocus()
                         return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                         self.play_index(idx); return True
@@ -2246,7 +2254,7 @@ class MainWindow(QMainWindow):
             return
         if event.key() in (Qt.Key_Escape, Qt.Key_Back) and self.keyboard_open:
             self.set_keyboard_visible(False)
-            self.query.setFocus()
+            self.keyboard_button.setFocus()
             return
         super().keyPressEvent(event)
 
