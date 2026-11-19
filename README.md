@@ -57,4 +57,6 @@ Example:
 - Search depends on yt-dlp's YouTube extractor and may be affected by YouTube changes, rate limits, or access challenges.
 - A selected quality is a maximum-height preference, not a guarantee the exact resolution exists.
 - This is an independent frontend, not the official YouTube app. No account sign-in, DRM circumvention, or private-video access is provided.
-- Thumbnail loading depends on the image URL returned by YouTube/yt-dlp; some results may remain text-only.\n- Remote-control behavior is keyboard-based and should be validated on the actual HG680P remote before deployment.
+- Thumbnail loading depends on the image URL returned by YouTube/yt-dlp; some results may remain text-only. 
+- The player can be stopped with the in-app STOP control; closing MPV also returns to the results list.
+- Remote-control behavior is keyboard-based and should be validated on the actual HG680P remote before deployment.
