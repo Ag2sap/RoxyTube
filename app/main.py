@@ -152,17 +152,17 @@ class TvKeyboard(QWidget):
             special = [
                 ("SHIFT", 2, self.toggle_shift, self.shift_once),
                 ("?123", 1, self.toggle_symbols, False),
-                ("CAPS" if not self.caps_locked else "CAPS ✓", 1, self.toggle_caps, self.caps_locked),
+                ("CAPS" if not self.caps_locked else "CAPS ON", 1, self.toggle_caps, self.caps_locked),
                 ("SPASI", 3, lambda: self.insert(" "), False),
-                ("⌫", 1, self.backspace, False),
+                ("DEL", 1, self.backspace, False),
                 ("SELESAI", 2, self.finish, False),
             ]
         else:
             special = [
                 ("ABC", 2, self.toggle_symbols, False),
-                ("CAPS" if not self.caps_locked else "CAPS ✓", 1, self.toggle_caps, self.caps_locked),
+                ("CAPS" if not self.caps_locked else "CAPS ON", 1, self.toggle_caps, self.caps_locked),
                 ("SPASI", 4, lambda: self.insert(" "), False),
-                ("⌫", 1, self.backspace, False),
+                ("DEL", 1, self.backspace, False),
                 ("SELESAI", 2, self.finish, False),
             ]
 
@@ -565,13 +565,13 @@ class MainWindow(QMainWindow):
         self.root_layout.addWidget(self.scroll, 1)
 
         page_nav = QHBoxLayout()
-        self.prev_page_button = QPushButton("‹")
+        self.prev_page_button = QPushButton("Prev")
         self.prev_page_button.setToolTip("Halaman sebelumnya")
         self.prev_page_button.clicked.connect(lambda: self.change_page(-1))
         self.page_label = QLabel("0 / 0")
         self.page_label.setAlignment(Qt.AlignCenter)
         self.page_label.setObjectName("hint")
-        self.next_page_button = QPushButton("›")
+        self.next_page_button = QPushButton("Next")
         self.next_page_button.setToolTip("Halaman berikutnya")
         self.next_page_button.clicked.connect(lambda: self.change_page(1))
         page_nav.addWidget(self.prev_page_button)
@@ -786,7 +786,7 @@ class MainWindow(QMainWindow):
         if visible == self.keyboard_open:
             return
         self.keyboard_open = visible
-        self.keyboard_button.setText("⌨ TUTUP" if visible else "⌨")
+        self.keyboard_button.setText("KEY CLOSE" if visible else "KEY")
         if self.keyboard_animation is not None:
             self.keyboard_animation.stop()
         self.keyboard.setVisible(True)
@@ -873,7 +873,7 @@ class MainWindow(QMainWindow):
             # YouTube retired the old /feed/trending endpoint. Use a public
             # relevance search instead of relying on that obsolete playlist.
             target = "ytsearch30:video trending Indonesia terbaru"
-            self.results_heading.setText("TRENDING 🔥  •  POPULER DI INDONESIA")
+            self.results_heading.setText("TRENDING  •  POPULER DI INDONESIA")
             self.status.setText("Mencari video populer di Indonesia…")
         process = QProcess(self)
         self.search_process = process
@@ -963,7 +963,7 @@ class MainWindow(QMainWindow):
                 self.results_heading.setText("BERANDA  •  PILIHAN VIDEO INDONESIA")
                 self.status.setText(f"{len(self.results)} rekomendasi publik.")
             elif self.feed_mode == "trending":
-                self.results_heading.setText("TRENDING 🔥  •  POPULER DI INDONESIA")
+                self.results_heading.setText("TRENDING  •  POPULER DI INDONESIA")
                 self.status.setText(f"{len(self.results)} video Trending.")
             else:
                 self.status.setText(f"{len(self.results)} video ditemukan.")
@@ -1269,7 +1269,7 @@ class MainWindow(QMainWindow):
 
     def retry_lower_quality(self, process, reason):
         if (process is not self.player_process or self.playback_started or
-                not self.fallback_qualities or self.pages.currentWidget() != self.player_page):
+                not self.fallback_qualities):
             return False
         next_quality = self.fallback_qualities.pop(0)
         self.player_process = None
@@ -1365,13 +1365,16 @@ class MainWindow(QMainWindow):
         for source, label in ((data.get("subtitles") or {}, "Tersedia"),
                               (data.get("automatic_captions") or {}, "Otomatis")):
             for lang, entries in source.items():
-                for item in entries:
-                    url = item.get("url")
-                    ext = item.get("ext", "")
-                    if url and ext in ("vtt", "srv3", "ttml", "json3"):
-                        tracks.append({"lang": lang, "name": item.get("name") or lang,
-                                       "source": label, "url": url})
-                        break
+                # Prefer WebVTT when YouTube exposes several encodings for one language.
+                item = next((entry for entry in entries
+                             if entry.get("url") and entry.get("ext") == "vtt"), None)
+                if item is None:
+                    item = next((entry for entry in entries
+                                 if entry.get("url") and entry.get("ext") in
+                                 ("srt", "ass", "srv3", "ttml", "json3")), None)
+                if item:
+                    tracks.append({"lang": lang, "name": item.get("name") or lang,
+                                   "source": label, "url": item["url"]})
         self.subtitle_box.blockSignals(True)
         self.subtitle_box.clear()
         self.subtitle_box.addItem("Subtitle: Off", None)
@@ -1531,7 +1534,7 @@ class MainWindow(QMainWindow):
     def populate_playlist(self):
         self.clear_side_content()
         for idx, item in enumerate(self.results):
-            button = QPushButton(("▶  " if idx == self.current_index else "") + item["title"])
+            button = QPushButton((">  " if idx == self.current_index else "") + item["title"])
             button.setToolTip(item["title"])
             button.setStyleSheet("text-align:left;padding:6px;font-size:11px;")
             button.clicked.connect(lambda checked=False, i=idx: self.play_index(i))
@@ -1653,7 +1656,8 @@ class MainWindow(QMainWindow):
         self.mini_title_offset = 0
         self.mini_title_button.setToolTip(self.mini_title_text)
         self.advance_mini_title()
-        if len(self.mini_title_text) > 24:
+        text_width = self.mini_title_button.fontMetrics().horizontalAdvance(self.mini_title_text)
+        if text_width > self.mini_title_button.width() - 22:
             self.mini_title_timer.start()
         else:
             self.mini_title_timer.stop()
