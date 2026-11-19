@@ -9,7 +9,7 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDi
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea,
-    QSizePolicy, QSlider, QStackedWidget, QVBoxLayout, QWidget,
+    QProgressBar, QSizePolicy, QSlider, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 APP_NAME = "YouTube Roxy"
@@ -364,6 +364,12 @@ class MainWindow(QMainWindow):
         self.fullscreen_hide_timer.setSingleShot(True)
         self.fullscreen_hide_timer.timeout.connect(self.hide_fullscreen_controls)
         self.fallback_qualities = []
+        self.background_playback = False
+        self.mini_title_text = ""
+        self.mini_title_offset = 0
+        self.mini_title_timer = QTimer(self)
+        self.mini_title_timer.setInterval(280)
+        self.mini_title_timer.timeout.connect(self.advance_mini_title)
         self.setStyleSheet("""
             QMainWindow, QWidget { background:#101318; color:#f4f6f8; font-family:Sans; }
             QLabel#brand { color:#ffffff; font-size:17px; font-weight:750; }
@@ -425,9 +431,79 @@ class MainWindow(QMainWindow):
         logo.setStyleSheet("color:#ff0033;font-size:22px;font-weight:900;")
         brand = QLabel("YouTube Roxy")
         brand.setObjectName("brand")
+        brand.setMaximumWidth(112)
         header.addWidget(logo)
         header.addWidget(brand)
-        header.addStretch(1)
+
+        self.mini_player = QFrame()
+        self.mini_player.setFixedWidth(278)
+        self.mini_player.setStyleSheet(
+            "QFrame{background:#171e28;border:1px solid #65758b;border-radius:6px;}"
+        )
+        mini_layout = QVBoxLayout(self.mini_player)
+        mini_layout.setContentsMargins(4, 3, 4, 3)
+        mini_layout.setSpacing(2)
+        self.mini_title_button = QPushButton("Tidak ada playback")
+        self.mini_title_button.setFixedHeight(22)
+        self.mini_title_button.setToolTip("Kembali ke video yang sedang diputar")
+        self.mini_title_button.setStyleSheet(
+            "text-align:left;padding:1px 4px;font-size:11px;border:0;"
+        )
+        self.mini_title_button.clicked.connect(self.return_to_playback)
+        mini_layout.addWidget(self.mini_title_button)
+        mini_controls = QHBoxLayout()
+        mini_controls.setSpacing(3)
+        self.mini_progress = QProgressBar()
+        self.mini_progress.setRange(0, 1000)
+        self.mini_progress.setValue(0)
+        self.mini_progress.setTextVisible(False)
+        self.mini_progress.setFixedWidth(76)
+        self.mini_progress.setFixedHeight(9)
+        self.mini_progress.setStyleSheet(
+            "QProgressBar{background:#394657;border:0;border-radius:3px;}"
+            "QProgressBar::chunk{background:#ff334f;border-radius:3px;}"
+        )
+        mini_controls.addWidget(self.mini_progress)
+        self.mini_rewind_button = QPushButton("−10")
+        self.mini_rewind_button.setFixedWidth(38)
+        self.mini_rewind_button.setToolTip("Mundur 10 detik")
+        self.mini_rewind_button.clicked.connect(lambda: self.seek_relative(-10))
+        self.mini_play_pause_button = QPushButton("Ⅱ")
+        self.mini_play_pause_button.setFixedWidth(34)
+        self.mini_play_pause_button.setToolTip("Jeda / lanjut")
+        self.mini_play_pause_button.clicked.connect(self.toggle_play_pause)
+        self.mini_fast_forward_button = QPushButton("+10")
+        self.mini_fast_forward_button.setFixedWidth(38)
+        self.mini_fast_forward_button.setToolTip("Maju 10 detik")
+        self.mini_fast_forward_button.clicked.connect(lambda: self.seek_relative(10))
+        self.mini_stop_button = QPushButton("■")
+        self.mini_stop_button.setFixedWidth(30)
+        self.mini_stop_button.setToolTip("Stop playback")
+        self.mini_stop_button.clicked.connect(self.stop_playback)
+        for widget in (self.mini_rewind_button, self.mini_play_pause_button,
+                       self.mini_fast_forward_button, self.mini_stop_button):
+            widget.setFixedHeight(23)
+            widget.setFocusPolicy(Qt.StrongFocus)
+            mini_controls.addWidget(widget)
+        mini_layout.addLayout(mini_controls)
+        header.addWidget(self.mini_player)
+        self.mini_player.hide()
+
+        self.window_controls_widget = QWidget()
+        window_controls = QHBoxLayout(self.window_controls_widget)
+        window_controls.setContentsMargins(0, 0, 0, 0)
+        window_controls.setSpacing(3)
+        self.minimize_button = QPushButton("—")
+        self.minimize_button.setFixedSize(30, 28)
+        self.minimize_button.setToolTip("Minimize aplikasi")
+        self.minimize_button.clicked.connect(self.showMinimized)
+        self.close_button = QPushButton("×")
+        self.close_button.setFixedSize(30, 28)
+        self.close_button.setToolTip("Tutup aplikasi dan hentikan playback")
+        self.close_button.clicked.connect(self.close)
+        window_controls.addWidget(self.minimize_button)
+        window_controls.addWidget(self.close_button)
+        header.addWidget(self.window_controls_widget)
         self.root_layout.addLayout(header)
 
         search_row = QHBoxLayout()
@@ -958,10 +1034,13 @@ class MainWindow(QMainWindow):
             return ["Auto"]
         return []
 
-    def play_index(self, index, start_position=0.0):
+    def play_index(self, index, start_position=0.0, background=False):
         if not self.results:
             return
         index = max(0, min(int(index), len(self.results) - 1))
+        self.background_playback = bool(background)
+        self.mini_player.setVisible(self.background_playback)
+        self.window_controls_widget.setVisible(not self.background_playback)
         self.current_index = index
         self.manual_stop = False
         self.selected_subtitle_track = None
@@ -975,6 +1054,7 @@ class MainWindow(QMainWindow):
         self.metadata_requested_index = None
         video = self.results[index]
         self.player_title.setText(video["title"])
+        self.set_mini_title(video["title"])
         channel = video.get("channel") or "YouTube"
         duration = video.get("duration") or ""
         self.player_meta.setText(f"{channel}  •  {duration}" if duration else channel)
@@ -985,7 +1065,12 @@ class MainWindow(QMainWindow):
         self.subtitle_box.blockSignals(False)
         self.show_side_panel("playlist")
         self.populate_playlist()
-        self.pages.setCurrentWidget(self.player_page)
+        if self.background_playback:
+            self.pages.setCurrentWidget(self.search_page)
+            self.mini_player.show()
+        else:
+            self.pages.setCurrentWidget(self.player_page)
+            self.mini_player.hide()
         self.video_surface.winId()
         # Keep keyboard focus in Roxy when MPV is embedded in the native surface.
         self.play_pause_button.setFocus(Qt.OtherFocusReason)
@@ -1146,7 +1231,9 @@ class MainWindow(QMainWindow):
                     self.update_timeline(self.current_time_pos, self.duration_seconds)
                 elif name == "pause" and isinstance(value, bool):
                     self.playback_paused = value
-                    self.play_pause_button.setText("▶" if value else "Ⅱ")
+                    label = "▶" if value else "Ⅱ"
+                    self.play_pause_button.setText(label)
+                    self.mini_play_pause_button.setText(label)
 
     def schedule_metadata_after_start(self, index, process, delay_ms):
         if self.metadata_requested_index == index:
@@ -1189,10 +1276,15 @@ class MainWindow(QMainWindow):
             self.set_playback_controls_enabled(False)
             if finished_naturally and finished_index + 1 < len(self.results):
                 self.player_status.setText("Video selesai. Memutar video berikutnya…")
-                QTimer.singleShot(250, lambda i=finished_index + 1:
-                                  self.play_index(i) if self.current_index == finished_index
+                keep_background = self.background_playback
+                QTimer.singleShot(250, lambda i=finished_index + 1, bg=keep_background:
+                                  self.play_index(i, background=bg)
+                                  if self.current_index == finished_index
                                   and self.player_process is None else None)
             elif self.pages.currentWidget() == self.player_page:
+                self.background_playback = False
+                self.mini_player.hide()
+                self.window_controls_widget.show()
                 self.player_status.setText(
                     "Pemutaran selesai." if finished_naturally
                     else "Pemutaran selesai atau stream terputus."
@@ -1207,6 +1299,9 @@ class MainWindow(QMainWindow):
             if self.retry_lower_quality(process, "MPV gagal membuka stream."):
                 return
             self.player_process = None
+            self.background_playback = False
+            self.mini_player.hide()
+            self.window_controls_widget.show()
             self.set_playback_controls_enabled(False)
             self.player_status.setText("MPV gagal dijalankan.")
         try:
@@ -1277,6 +1372,9 @@ class MainWindow(QMainWindow):
         position = max(0.0, float(position or 0))
         self.elapsed_label.setText(self.format_time(position))
         self.duration_label.setText(self.format_time(duration))
+        self.mini_progress.setValue(
+            int(min(1.0, position / duration) * 1000) if duration > 0 else 0
+        )
         if not self.slider_dragging:
             self.seek_slider.blockSignals(True)
             self.seek_slider.setRange(0, max(0, int(duration)))
@@ -1317,7 +1415,9 @@ class MainWindow(QMainWindow):
             return
         self.mpv_command(["cycle", "pause"])
         self.playback_paused = not self.playback_paused
-        self.play_pause_button.setText("▶" if self.playback_paused else "Ⅱ")
+        label = "▶" if self.playback_paused else "Ⅱ"
+        self.play_pause_button.setText(label)
+        self.mini_play_pause_button.setText(label)
 
     def set_playback_controls_enabled(self, enabled):
         for widget in (self.rewind_button, self.play_pause_button, self.fast_forward_button,
@@ -1424,7 +1524,12 @@ class MainWindow(QMainWindow):
                 item.widget().deleteLater()
 
     def stop_playback(self):
+        if self.is_playback_fullscreen:
+            self.exit_playback_fullscreen()
         self.manual_stop = True
+        self.background_playback = False
+        self.mini_player.hide()
+        self.window_controls_widget.show()
         self.fallback_qualities.clear()
         process = self.player_process
         self.player_process = None
@@ -1445,6 +1550,9 @@ class MainWindow(QMainWindow):
 
     def back_to_results(self):
         self.fallback_qualities.clear()
+        self.background_playback = self.process_is_running(self.player_process)
+        self.mini_player.setVisible(self.background_playback)
+        self.window_controls_widget.show()
         self.set_playback_controls_enabled(False)
         self.slider_dragging = False
         self.pages.setCurrentWidget(self.search_page)
@@ -1502,6 +1610,43 @@ class MainWindow(QMainWindow):
         self.controls_widget.hide()
         self.fullscreen_controls_visible = False
         self.player_page.setFocus(Qt.OtherFocusReason)
+
+    def set_mini_title(self, title):
+        self.mini_title_text = str(title or "Video tanpa judul")
+        self.mini_title_offset = 0
+        self.mini_title_button.setToolTip(self.mini_title_text)
+        self.advance_mini_title()
+        if len(self.mini_title_text) > 24:
+            self.mini_title_timer.start()
+        else:
+            self.mini_title_timer.stop()
+            self.mini_title_button.setText(self.mini_title_text)
+
+    def advance_mini_title(self):
+        text = self.mini_title_text
+        if not text:
+            return
+        char_width = max(1, self.mini_title_button.fontMetrics().horizontalAdvance("M"))
+        visible = max(8, int((self.mini_title_button.width() - 22) / char_width))
+        if len(text) <= visible:
+            self.mini_title_button.setText(text)
+            return
+        cycle = text + "   "
+        doubled = cycle + cycle
+        start = self.mini_title_offset
+        self.mini_title_button.setText(doubled[start:start + visible])
+        self.mini_title_offset = (start + 1) % len(cycle)
+
+    def return_to_playback(self):
+        if not self.process_is_running(self.player_process):
+            self.mini_player.hide()
+            return
+        self.background_playback = False
+        self.mini_player.hide()
+        self.window_controls_widget.hide()
+        self.pages.setCurrentWidget(self.player_page)
+        self.set_playback_controls_enabled(True)
+        self.play_pause_button.setFocus(Qt.OtherFocusReason)
 
     def eventFilter(self, watched, event):
         if self.is_playback_fullscreen and event.type() == QEvent.MouseMove:
@@ -1632,6 +1777,27 @@ class MainWindow(QMainWindow):
                     self.mpv_command(["cycle", "pause"])
                     return True
             elif self.pages.currentWidget() == self.search_page:
+                mini_buttons = (self.mini_rewind_button, self.mini_play_pause_button,
+                                self.mini_fast_forward_button, self.mini_stop_button)
+                if focus is self.mini_title_button and self.mini_player.isVisible():
+                    if key == Qt.Key_Down:
+                        self.mini_rewind_button.setFocus(); return True
+                    if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
+                        self.return_to_playback(); return True
+                if focus in mini_buttons:
+                    pos = mini_buttons.index(focus)
+                    if key == Qt.Key_Left and pos > 0:
+                        mini_buttons[pos - 1].setFocus(); return True
+                    if key == Qt.Key_Right and pos < len(mini_buttons) - 1:
+                        mini_buttons[pos + 1].setFocus(); return True
+                    if key == Qt.Key_Up:
+                        self.mini_title_button.setFocus(); return True
+                    if key == Qt.Key_Down:
+                        if self.cards:
+                            self.cards[0].setFocus()
+                        else:
+                            self.query.setFocus()
+                        return True
                 if key in (Qt.Key_Escape, Qt.Key_Back):
                     if self.keyboard_open:
                         self.set_keyboard_visible(False)
@@ -1672,6 +1838,8 @@ class MainWindow(QMainWindow):
                         self.query.setFocus(); return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                         self.play_index(idx); return True
+                if focus is self.query and key == Qt.Key_Up and self.mini_player.isVisible():
+                    self.mini_title_button.setFocus(); return True
                 if focus is self.query and key == Qt.Key_Left:
                     self.expand_sidebar()
                     self.nav_buttons[1].setFocus()
@@ -1696,6 +1864,17 @@ class MainWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def closeEvent(self, event):
+        if self.process_is_running(self.player_process):
+            answer = QMessageBox.question(
+                self, APP_NAME,
+                "Playback masih berjalan. Tutup Roxy dan hentikan playback?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if answer != QMessageBox.Yes:
+                event.ignore()
+                return
+        self.mini_title_timer.stop()
+        self.fullscreen_hide_timer.stop()
         for process in (self.search_process, self.player_process, self.metadata_process):
             if self.process_is_running(process):
                 process.terminate()
