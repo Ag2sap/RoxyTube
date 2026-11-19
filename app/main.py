@@ -816,10 +816,16 @@ class MainWindow(QMainWindow):
                     self.back_to_results()
                     return True
                 if key == Qt.Key_Left and focus is self.subtitle_box:
+                    self.quality.setFocus()
+                    return True
+                if key == Qt.Key_Right and focus is self.quality:
+                    self.subtitle_box.setFocus()
+                    return True
+                if key == Qt.Key_Left and focus is self.quality:
                     self.stop_button.setFocus()
                     return True
                 if key == Qt.Key_Right and focus is self.stop_button:
-                    self.subtitle_box.setFocus()
+                    self.quality.setFocus()
                     return True
                 if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select) and focus is self.video_surface:
                     self.mpv_command(["cycle", "pause"])
