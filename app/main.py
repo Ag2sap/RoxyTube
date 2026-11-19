@@ -596,8 +596,8 @@ class MainWindow(QMainWindow):
         header.addWidget(self.mini_player, 0, Qt.AlignRight)
         self.mini_player.hide()
 
-        # Pin controls to the actual Home window corner, independent of sidebar width.
-        self.window_controls_widget = QWidget(self.search_page)
+        # Keep window controls in the header so the whole group aligns with Search.
+        self.window_controls_widget = QWidget(content)
         self.window_controls_widget.setFixedSize(57, 26)
         window_controls = QHBoxLayout(self.window_controls_widget)
         window_controls.setContentsMargins(0, 0, 0, 0)
@@ -948,14 +948,6 @@ class MainWindow(QMainWindow):
         self.refresh_card_columns()
         if self.mini_player.isVisible():
             QTimer.singleShot(0, self.advance_mini_title)
-
-    def position_window_controls(self):
-        if not hasattr(self, "window_controls_widget"):
-            return
-        self.window_controls_widget.move(
-            max(0, self.search_page.width() - self.window_controls_widget.width() - 5), 3
-        )
-        self.window_controls_widget.raise_()
 
     def refresh_card_columns(self):
         if not hasattr(self, "scroll"):
