@@ -322,6 +322,8 @@ class MainWindow(QMainWindow):
             return
         self.keyboard_open = visible
         self.keyboard_button.setText("⌨ TUTUP" if visible else "⌨ KEYBOARD")
+        if self.keyboard_animation is not None:
+            self.keyboard_animation.stop()
         self.keyboard.setVisible(True)
         animation = QPropertyAnimation(self.keyboard, b"maximumHeight", self)
         animation.setDuration(220)
