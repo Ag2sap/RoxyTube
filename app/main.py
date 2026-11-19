@@ -358,6 +358,11 @@ class MainWindow(QMainWindow):
         self.playback_started = False
         self.manual_stop = False
         self.selected_subtitle_track = None
+        self.is_playback_fullscreen = False
+        self.fullscreen_controls_visible = False
+        self.fullscreen_hide_timer = QTimer(self)
+        self.fullscreen_hide_timer.setSingleShot(True)
+        self.fullscreen_hide_timer.timeout.connect(self.hide_fullscreen_controls)
         self.fallback_qualities = []
         self.setStyleSheet("""
             QMainWindow, QWidget { background:#101318; color:#f4f6f8; font-family:Sans; }
@@ -493,10 +498,13 @@ class MainWindow(QMainWindow):
 
         # Embedded player page
         self.player_page = QWidget()
+        self.player_page.setFocusPolicy(Qt.StrongFocus)
+        self.player_page.setMouseTracking(True)
         player_layout = QVBoxLayout(self.player_page)
         player_layout.setContentsMargins(2, 2, 2, 2)
         player_layout.setSpacing(5)
-        player_header = QHBoxLayout()
+        self.player_header_widget = QWidget()
+        player_header = QHBoxLayout(self.player_header_widget)
         self.player_title = QLabel("Pemutar YouTube")
         self.player_title.setObjectName("brand")
         self.player_title.setWordWrap(True)
@@ -505,7 +513,7 @@ class MainWindow(QMainWindow):
         self.back_button.clicked.connect(self.back_to_results)
         player_header.addWidget(self.back_button)
         player_header.addWidget(self.player_title, 1)
-        player_layout.addLayout(player_header)
+        player_layout.addWidget(self.player_header_widget)
 
         # PlasmaTube-inspired watch page: wide video first, queue/details below.
         # A vertical flow is better suited to the device's 4:3 PAL display.
@@ -517,6 +525,7 @@ class MainWindow(QMainWindow):
         # The embedded MPV child must never become the Qt focus target.
         # Roxy owns remote/D-pad navigation; playback is controlled via IPC.
         self.video_surface.setFocusPolicy(Qt.NoFocus)
+        self.video_surface.setMouseTracking(True)
         self.video_surface.setMinimumSize(300, 170)
         self.video_surface.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.video_surface.setStyleSheet("background:#000000;border:1px solid #384354;")
@@ -555,7 +564,9 @@ class MainWindow(QMainWindow):
         self.side_text_layout.setSpacing(2)
         self.side_content.setWidget(self.side_text_host)
         side_layout.addWidget(self.side_content, 1)
-        timeline = QHBoxLayout()
+        self.timeline_widget = QWidget()
+        timeline = QHBoxLayout(self.timeline_widget)
+        timeline.setContentsMargins(0, 0, 0, 0)
         timeline.setSpacing(5)
         self.elapsed_label = QLabel("0:00")
         self.elapsed_label.setObjectName("hint")
@@ -583,9 +594,11 @@ class MainWindow(QMainWindow):
         timeline.addWidget(self.elapsed_label)
         timeline.addWidget(self.seek_slider, 1)
         timeline.addWidget(self.duration_label)
-        body.addLayout(timeline)
+        body.addWidget(self.timeline_widget)
 
-        controls = QHBoxLayout()
+        self.controls_widget = QWidget()
+        controls = QHBoxLayout(self.controls_widget)
+        controls.setContentsMargins(0, 0, 0, 0)
         self.previous_video_button = QPushButton("⏮")
         self.previous_video_button.setToolTip("Video sebelumnya")
         self.previous_video_button.clicked.connect(lambda: self.play_index(self.current_index - 1))
@@ -611,6 +624,9 @@ class MainWindow(QMainWindow):
         self.subtitle_box.setMinimumWidth(105)
         self.subtitle_box.addItem("Subtitle: Off", None)
         self.subtitle_box.currentIndexChanged.connect(self.select_subtitle)
+        self.fullscreen_button = QPushButton("Maximize")
+        self.fullscreen_button.setToolTip("Fullscreen playback")
+        self.fullscreen_button.clicked.connect(self.toggle_playback_fullscreen)
         self.quality = QComboBox()
         self.quality.addItems(list(QUALITY_FORMATS))
         self.quality.setCurrentText("720p")
@@ -636,7 +652,8 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.quality)
         controls.addWidget(QLabel("CC"))
         controls.addWidget(self.subtitle_box)
-        body.addLayout(controls)
+        controls.addWidget(self.fullscreen_button)
+        body.addWidget(self.controls_widget)
         body.addWidget(self.side_panel, 2)
         player_layout.addLayout(body, 1)
         self.player_status = QLabel("Menyiapkan pemutar…")
@@ -1304,7 +1321,8 @@ class MainWindow(QMainWindow):
 
     def set_playback_controls_enabled(self, enabled):
         for widget in (self.rewind_button, self.play_pause_button, self.fast_forward_button,
-                       self.seek_slider, self.volume_slider, self.quality, self.subtitle_box):
+                       self.seek_slider, self.volume_slider, self.quality, self.subtitle_box,
+                       self.fullscreen_button):
             widget.setEnabled(bool(enabled))
         self.previous_video_button.setEnabled(bool(enabled) and self.current_index > 0)
         self.next_video_button.setEnabled(bool(enabled) and self.current_index + 1 < len(self.results))
@@ -1435,9 +1453,80 @@ class MainWindow(QMainWindow):
         else:
             self.query.setFocus()
 
+    def toggle_playback_fullscreen(self):
+        if self.is_playback_fullscreen:
+            self.exit_playback_fullscreen()
+            return
+        self.is_playback_fullscreen = True
+        self.showFullScreen()
+        self.player_header_widget.hide()
+        self.player_meta.hide()
+        self.side_panel.hide()
+        self.player_status.hide()
+        self.timeline_widget.hide()
+        self.controls_widget.hide()
+        self.fullscreen_button.setText("Minimize")
+        self.fullscreen_button.setToolTip("Kembali ke tampilan normal")
+        self.fullscreen_controls_visible = False
+        self.player_page.setFocus()
+
+    def exit_playback_fullscreen(self):
+        self.fullscreen_hide_timer.stop()
+        self.is_playback_fullscreen = False
+        self.fullscreen_controls_visible = True
+        self.showNormal()
+        self.player_header_widget.show()
+        self.player_meta.show()
+        self.side_panel.show()
+        self.player_status.show()
+        self.timeline_widget.show()
+        self.controls_widget.show()
+        self.fullscreen_button.setText("Maximize")
+        self.fullscreen_button.setToolTip("Fullscreen playback")
+        self.play_pause_button.setFocus(Qt.OtherFocusReason)
+
+    def show_fullscreen_controls(self, focus_slider=False):
+        if not self.is_playback_fullscreen:
+            return
+        self.timeline_widget.show()
+        self.controls_widget.show()
+        self.fullscreen_controls_visible = True
+        if focus_slider:
+            self.seek_slider.setFocus(Qt.OtherFocusReason)
+        self.fullscreen_hide_timer.start(1000)
+
+    def hide_fullscreen_controls(self):
+        if not self.is_playback_fullscreen:
+            return
+        self.timeline_widget.hide()
+        self.controls_widget.hide()
+        self.fullscreen_controls_visible = False
+        self.player_page.setFocus(Qt.OtherFocusReason)
+
     def eventFilter(self, watched, event):
+        if self.is_playback_fullscreen and event.type() == QEvent.MouseMove:
+            try:
+                point = watched.mapTo(self.player_page, event.position().toPoint())
+                if point.y() >= int(self.player_page.height() * 0.68):
+                    self.show_fullscreen_controls()
+                elif self.fullscreen_controls_visible:
+                    self.fullscreen_hide_timer.start(1000)
+            except (AttributeError, RuntimeError, TypeError):
+                pass
         if event.type() == QEvent.KeyPress and self.isActiveWindow():
             key, focus = event.key(), QApplication.focusWidget()
+            if self.is_playback_fullscreen:
+                if key in (Qt.Key_Escape, Qt.Key_Back):
+                    self.exit_playback_fullscreen()
+                    return True
+                if self.fullscreen_controls_visible:
+                    self.fullscreen_hide_timer.start(1000)
+                elif key == Qt.Key_Down:
+                    self.show_fullscreen_controls(focus_slider=True)
+                    return True
+                elif focus is self.player_page and key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
+                    self.toggle_play_pause()
+                    return True
             if self.pages.currentWidget() == self.player_page:
                 if key in (Qt.Key_Escape, Qt.Key_Back):
                     self.back_to_results()
@@ -1493,6 +1582,15 @@ class MainWindow(QMainWindow):
                 if focus is self.subtitle_box:
                     if key == Qt.Key_Left:
                         self.quality.setFocus(); return True
+                    if key == Qt.Key_Right:
+                        self.fullscreen_button.setFocus(); return True
+                    if key == Qt.Key_Up:
+                        self.seek_slider.setFocus(); return True
+                    if key == Qt.Key_Down:
+                        self.playlist_button.setFocus(); return True
+                if focus is self.fullscreen_button:
+                    if key == Qt.Key_Left:
+                        self.subtitle_box.setFocus(); return True
                     if key == Qt.Key_Up:
                         self.seek_slider.setFocus(); return True
                     if key == Qt.Key_Down:
