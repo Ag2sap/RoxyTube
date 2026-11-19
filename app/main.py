@@ -657,6 +657,7 @@ class MainWindow(QMainWindow):
         self.side_content.setWidget(self.side_text_host)
         side_layout.addWidget(self.side_content, 1)
         self.timeline_widget = QWidget()
+        self.timeline_widget.setMouseTracking(True)
         timeline = QHBoxLayout(self.timeline_widget)
         timeline.setContentsMargins(0, 0, 0, 0)
         timeline.setSpacing(5)
@@ -689,6 +690,7 @@ class MainWindow(QMainWindow):
         body.addWidget(self.timeline_widget)
 
         self.controls_widget = QWidget()
+        self.controls_widget.setMouseTracking(True)
         controls = QHBoxLayout(self.controls_widget)
         controls.setContentsMargins(0, 0, 0, 0)
         self.previous_video_button = QPushButton()
