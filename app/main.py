@@ -47,6 +47,7 @@ class VideoCard(QFrame):
     def __init__(self, index, title, channel, duration, parent=None):
         super().__init__(parent)
         self.index = index
+        self.on_activate = None
         self.setObjectName("videoCard")
         self.setFocusPolicy(Qt.StrongFocus)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -71,6 +72,15 @@ class VideoCard(QFrame):
         self.meta_label = QLabel(f"{channel}  •  {duration}" if duration else channel)
         self.meta_label.setStyleSheet("font-size:11px;color:#aeb8c5;border:0;")
         layout.addWidget(self.meta_label)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.image.setFixedHeight(max(90, int((self.width() - 24) * 9 / 16)))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and callable(self.on_activate):
+            self.on_activate(self.index)
+        super().mousePressEvent(event)
 
     def set_thumbnail(self, pixmap):
         if pixmap.isNull():
@@ -400,7 +410,8 @@ class MainWindow(QMainWindow):
                           "thumbnail": entry.get("thumbnail"), "duration": duration_text}
                 self.results.append(result)
                 card = VideoCard(len(self.results)-1, title, channel, duration_text, self.cards_host)
-                card.setMinimumHeight(170)
+                card.setMinimumHeight(245)
+                card.on_activate = self.play_selected
                 card.installEventFilter(self)
                 self.cards.append(card)
                 if result["thumbnail"]:
