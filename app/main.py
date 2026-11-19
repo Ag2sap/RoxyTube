@@ -545,6 +545,7 @@ class MainWindow(QMainWindow):
         side_layout.addLayout(side_buttons)
         self.side_content = QScrollArea()
         self.side_content.setWidgetResizable(True)
+        self.side_content.setFocusPolicy(Qt.StrongFocus)
         self.side_content.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.side_text_host = QWidget()
         self.side_text_layout = QVBoxLayout(self.side_text_host)
@@ -586,14 +587,16 @@ class MainWindow(QMainWindow):
         self.previous_video_button = QPushButton("⏮")
         self.previous_video_button.setToolTip("Video sebelumnya")
         self.previous_video_button.clicked.connect(lambda: self.play_index(self.current_index - 1))
-        self.rewind_button = QPushButton("−10s")
+        self.rewind_button = QPushButton("−10")
+        self.rewind_button.setFixedWidth(46)
         self.rewind_button.setToolTip("Mundur 10 detik")
         self.rewind_button.clicked.connect(lambda: self.seek_relative(-10))
         self.play_pause_button = QPushButton("Ⅱ")
         self.play_pause_button.setToolTip("Jeda / lanjut")
         self.play_pause_button.clicked.connect(self.toggle_play_pause)
         self.play_pause_button.setFocusPolicy(Qt.StrongFocus)
-        self.fast_forward_button = QPushButton("+10s")
+        self.fast_forward_button = QPushButton("+10")
+        self.fast_forward_button.setFixedWidth(46)
         self.fast_forward_button.setToolTip("Maju 10 detik")
         self.fast_forward_button.clicked.connect(lambda: self.seek_relative(10))
         self.next_video_button = QPushButton("⏭")
@@ -1444,6 +1447,18 @@ class MainWindow(QMainWindow):
                         self.seek_slider.setFocus(); return True
                     if key == Qt.Key_Down:
                         self.playlist_button.setFocus(); return True
+                if focus is self.side_content.viewport():
+                    scroll_bar = self.side_content.verticalScrollBar()
+                    if key == Qt.Key_Up:
+                        if scroll_bar.value() <= scroll_bar.minimum():
+                            self.subtitle_box.setFocus(); return True
+                        scroll_bar.setValue(max(scroll_bar.minimum(),
+                                                scroll_bar.value() - scroll_bar.singleStep()))
+                        return True
+                    if key == Qt.Key_Down:
+                        scroll_bar.setValue(min(scroll_bar.maximum(),
+                                                scroll_bar.value() + scroll_bar.singleStep()))
+                        return True
                 if focus in (self.playlist_button, self.description_button):
                     if key == Qt.Key_Left:
                         self.playlist_button.setFocus(); return True
