@@ -1075,7 +1075,7 @@ class MainWindow(QMainWindow):
         self.manual_stop = False
         self.selected_subtitle_track = None
         self.current_time_pos = max(0.0, float(start_position or 0.0))
-        self.duration_seconds = float(self.results[index].get("duration_seconds") or 0)
+        self.duration_seconds = float(self.playback_queue[index].get("duration_seconds") or 0)
         self.update_timeline(self.current_time_pos, self.duration_seconds)
         self.set_playback_controls_enabled(False)
         self.playback_paused = False
@@ -1553,7 +1553,9 @@ class MainWindow(QMainWindow):
             button.setToolTip(item["title"])
             button.setFocusPolicy(Qt.StrongFocus)
             button.setStyleSheet("text-align:left;padding:6px;font-size:11px;")
-            button.clicked.connect(lambda checked=False, i=idx: self.play_index(i))
+            button.clicked.connect(
+                lambda checked=False, i=idx: self.play_index(i, queue=self.playback_queue)
+            )
             self.side_text_layout.addWidget(button)
             self.playlist_items.append(button)
         self.side_text_layout.addStretch(1)
