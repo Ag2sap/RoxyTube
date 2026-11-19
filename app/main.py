@@ -649,7 +649,8 @@ class MainWindow(QMainWindow):
     def refresh_card_columns(self):
         if not hasattr(self, "scroll"):
             return
-        columns = 1 if self.feed_mode == "home" else 2
+        # Recommended/Home uses the same two-column grid as Search.
+        columns = 2
         for i, card in enumerate(self.cards):
             self.cards_grid.removeWidget(card)
             self.cards_grid.addWidget(card, i // columns, i % columns)
@@ -847,11 +848,12 @@ class MainWindow(QMainWindow):
         self.current_page = max(0, min(self.current_page, total_pages - 1))
         start = self.current_page * self.page_size
         end = min(len(self.results), start + self.page_size)
-        columns = 1 if self.feed_mode == "home" else 2
+        # Keep Recommended, Trending, and Search visually consistent.
+        columns = 2
         for idx in range(start, end):
             result = self.results[idx]
             card = VideoCard(idx, result["title"], result["channel"], result["duration"], self.cards_host)
-            card.setMinimumHeight(310 if self.feed_mode == "home" else 250)
+            card.setMinimumHeight(250)
             card.on_activate = self.play_index
             card.installEventFilter(self)
             self.cards.append(card)
@@ -1382,7 +1384,7 @@ class MainWindow(QMainWindow):
                         self.select_section(self.nav_modes[nav_index]); return True
                 if focus in self.cards:
                     idx = self.cards.index(focus)
-                    cols = 1 if self.feed_mode == "home" else 2
+                    cols = 2
                     if key == Qt.Key_Left and idx % cols == 0:
                         self.expand_sidebar()
                         active = self.nav_modes.index(self.feed_mode) if self.feed_mode in self.nav_modes else 0
