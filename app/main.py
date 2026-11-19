@@ -1626,8 +1626,9 @@ class MainWindow(QMainWindow):
             self.query.setFocus()
 
     def back_to_results(self):
-        self.fallback_qualities.clear()
         self.background_playback = self.process_is_running(self.player_process)
+        if not self.background_playback:
+            self.fallback_qualities.clear()
         self.mini_player.setVisible(self.background_playback)
         self.window_controls_widget.show()
         self.set_playback_controls_enabled(False)
