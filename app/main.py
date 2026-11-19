@@ -4,7 +4,7 @@ from __future__ import annotations
 import json, os, shutil, sys
 from pathlib import Path
 from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve, QSize
-from PySide6.QtGui import QPixmap, QPainter, QPen, QColor
+from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QIcon
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDiskCache, QLocalSocket, QLocalServer
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
@@ -15,14 +15,15 @@ from PySide6.QtWidgets import (
 APP_NAME = "YouTube Roxy"
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 SAFE_AREA_FILE = CONFIG_DIR / "roxy-display" / "safe-area.json"
+SETTINGS_FILE = CONFIG_DIR / "roxy-youtube-tv" / "settings.json"
 CACHE_DIR = Path.home() / ".cache" / "roxy-youtube-tv" / "thumbnails"
 YTDLP = os.environ.get("ROXY_YT_DLP", "yt-dlp")
 MPV = os.environ.get("ROXY_MPV", "mpv")
 QUALITY_FORMATS = {
-    "Auto": "bestvideo+bestaudio/best",
-    "360p": "bestvideo[height<=360]+bestaudio/best[height<=360]",
-    "480p": "bestvideo[height<=480]+bestaudio/best[height<=480]",
-    "720p": "bestvideo[height<=720]+bestaudio/best[height<=720]",
+    "Auto": "bv*+ba/b",
+    "360p": "bv*[height<=360]+ba/b[height<=360]",
+    "480p": "bv*[height<=480]+ba/b[height<=480]",
+    "720p": "bv*[height<=720]+ba/b[height<=720]",
 }
 
 
@@ -35,6 +36,41 @@ def safe_area_margins():
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         pass
     return values
+
+
+def load_app_settings():
+    defaults = {"volume": 100, "page_size": 8}
+    try:
+        data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            defaults["volume"] = max(0, min(100, int(data.get("volume", 100))))
+            page_size = int(data.get("page_size", 8))
+            defaults["page_size"] = page_size if page_size in (6, 8, 12) else 8
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        pass
+    return defaults
+
+
+def save_app_settings(settings):
+    try:
+        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temporary = SETTINGS_FILE.with_suffix(".tmp")
+        temporary.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n",
+                             encoding="utf-8")
+        temporary.replace(SETTINGS_FILE)
+    except OSError:
+        pass
+
+
+def monochrome_icon(icon, size, color="#000000"):
+    pixmap = QPixmap(size)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.drawPixmap(0, 0, icon.pixmap(size))
+    painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+    painter.fillRect(pixmap.rect(), QColor(color))
+    painter.end()
+    return QIcon(pixmap)
 
 
 def video_url(entry):
@@ -55,37 +91,6 @@ def thumbnail_url(entry):
                                    abs((x.get("width") or 320) - 320)))
         return usable[0]["url"]
     return entry.get("thumbnail")
-
-
-class CircularProgress(QWidget):
-    """Small ring indicator for the Home mini-player."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._value = 0
-        self.setFixedSize(18, 18)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setStyleSheet("background:transparent;border:0;")
-        self.setToolTip("Progress playback")
-
-    def setValue(self, value):
-        value = max(0, min(1000, int(value)))
-        if value != self._value:
-            self._value = value
-            self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        rect = self.rect().adjusted(3, 3, -3, -3)
-        base_pen = QPen(QColor("#394657"), 2.4)
-        base_pen.setCapStyle(Qt.RoundCap)
-        painter.setPen(base_pen)
-        painter.drawArc(rect, 0, 360 * 16)
-        if self._value:
-            progress_pen = QPen(QColor("#ff334f"), 2.4)
-            progress_pen.setCapStyle(Qt.RoundCap)
-            painter.setPen(progress_pen)
-            painter.drawArc(rect, 90 * 16, -int(360 * 16 * self._value / 1000))
 
 
 class TvKeyboard(QWidget):
@@ -361,12 +366,15 @@ class MainWindow(QMainWindow):
         self.resize(700, 525)
         self.setMinimumSize(560, 420)
         self.setMaximumSize(900, 675)
+        self.settings_data = load_app_settings()
         self.results, self.cards = [], []
         self.playback_queue = []
         self.search_process = self.player_process = self.metadata_process = None
         self.current_index = 0
         self.current_page = 0
-        self.page_size = 8
+        self.page_size = self.settings_data["page_size"]
+        self._activation_state = "normal"
+        self._playback_return_state = "normal"
         self.thumbnail_queue = []
         self.thumbnail_active = 0
         self.thumbnail_cards = {}
@@ -506,8 +514,6 @@ class MainWindow(QMainWindow):
         )
         self.mini_title_button.clicked.connect(self.return_to_playback)
         mini_title_row.addWidget(self.mini_title_button, 1)
-        self.mini_progress = CircularProgress()
-        mini_title_row.addWidget(self.mini_progress, 0, Qt.AlignVCenter)
         mini_layout.addLayout(mini_title_row)
 
         mini_controls = QHBoxLayout()
@@ -538,10 +544,14 @@ class MainWindow(QMainWindow):
             widget.setStyleSheet("QPushButton{padding:0;border-radius:5px;}")
             widget.setFocusPolicy(Qt.StrongFocus)
             mini_controls.addWidget(widget)
-        mini_controls.addStretch(1)
+        self.mini_time_label = QLabel("0:00/0:00")
+        self.mini_time_label.setObjectName("hint")
+        self.mini_time_label.setMinimumWidth(62)
+        self.mini_time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        mini_controls.addWidget(self.mini_time_label)
         mini_layout.addLayout(mini_controls)
-        header.addWidget(self.mini_player)
         header.addStretch(1)
+        header.addWidget(self.mini_player)
         self.mini_player.hide()
 
         # Pin controls to the actual Home window corner, independent of sidebar width.
@@ -551,12 +561,14 @@ class MainWindow(QMainWindow):
         window_controls.setContentsMargins(0, 0, 0, 0)
         window_controls.setSpacing(1)
         self.minimize_button = QPushButton()
-        self.minimize_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMinButton))
+        self.minimize_button.setIcon(monochrome_icon(
+            self.style().standardIcon(QStyle.SP_TitleBarMinButton), QSize(15, 15)))
         self.minimize_button.setFixedSize(27, 25)
         self.minimize_button.setToolTip("Minimize aplikasi")
-        self.minimize_button.clicked.connect(self.showMinimized)
+        self.minimize_button.clicked.connect(self.minimize_window)
         self.close_button = QPushButton()
-        self.close_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarCloseButton))
+        self.close_button.setIcon(monochrome_icon(
+            self.style().standardIcon(QStyle.SP_TitleBarCloseButton), QSize(15, 15)))
         self.close_button.setFixedSize(27, 25)
         self.close_button.setToolTip("Tutup aplikasi dan hentikan playback")
         self.close_button.clicked.connect(self.close)
@@ -573,12 +585,15 @@ class MainWindow(QMainWindow):
 
         search_row = QHBoxLayout()
         self.query = QLineEdit()
+        self.query.setFocusPolicy(Qt.ClickFocus)
         self.query.setPlaceholderText("Cari video atau tempel URL YouTube…")
         self.query.returnPressed.connect(self.search)
         self.keyboard_button = QPushButton("KEY")
+        self.keyboard_button.setFocusPolicy(Qt.StrongFocus)
         self.keyboard_button.setToolTip("Buka keyboard layar")
         self.keyboard_button.clicked.connect(self.toggle_keyboard)
         self.search_button = QPushButton("Search")
+        self.search_button.setFocusPolicy(Qt.StrongFocus)
         self.search_button.setToolTip("Cari video")
         self.search_button.clicked.connect(self.search)
         search_row.addWidget(self.query, 1)
@@ -593,16 +608,6 @@ class MainWindow(QMainWindow):
         self.keyboard.setVisible(False)
         self.keyboard.setMaximumHeight(0)
         self.root_layout.addWidget(self.keyboard)
-
-        options = QHBoxLayout()
-        options.addWidget(QLabel("Video per halaman"))
-        self.page_size_box = QComboBox()
-        self.page_size_box.addItems(["6", "8", "12"])
-        self.page_size_box.setCurrentText("8")
-        self.page_size_box.currentTextChanged.connect(self.change_page_size)
-        options.addWidget(self.page_size_box)
-        options.addStretch(1)
-        self.root_layout.addLayout(options)
 
         self.results_heading = QLabel("HASIL VIDEO")
         self.results_heading.setObjectName("hint")
@@ -636,6 +641,29 @@ class MainWindow(QMainWindow):
         self.status.setWordWrap(True)
         self.root_layout.addWidget(self.status)
         self.pages.addWidget(self.search_page)
+
+        # Dedicated settings page; page-size selection is no longer on Home.
+        self.settings_page = QWidget()
+        settings_layout = QVBoxLayout(self.settings_page)
+        settings_layout.setContentsMargins(18, 18, 18, 18)
+        settings_layout.setSpacing(12)
+        settings_header = QHBoxLayout()
+        settings_title = QLabel("Pengaturan")
+        settings_title.setObjectName("brand")
+        settings_header.addWidget(settings_title, 1)
+        self.settings_back_button = QPushButton("Kembali")
+        self.settings_back_button.clicked.connect(self.return_from_settings)
+        settings_header.addWidget(self.settings_back_button)
+        settings_layout.addLayout(settings_header)
+        settings_layout.addWidget(QLabel("Jumlah video per halaman"))
+        self.page_size_box = QComboBox()
+        self.page_size_box.addItems(["6", "8", "12"])
+        self.page_size_box.setCurrentText(str(self.page_size))
+        self.page_size_box.setMinimumWidth(100)
+        self.page_size_box.currentTextChanged.connect(self.change_page_size)
+        settings_layout.addWidget(self.page_size_box, 0, Qt.AlignLeft)
+        settings_layout.addStretch(1)
+        self.pages.addWidget(self.settings_page)
 
         # Embedded player page
         self.player_page = QWidget()
@@ -671,12 +699,20 @@ class MainWindow(QMainWindow):
         self.video_surface.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.video_surface.setStyleSheet("background:#000000;border:1px solid #384354;")
         body.addWidget(self.video_surface, 5)
+        meta_row = QHBoxLayout()
         self.player_meta = QLabel("")
         self.player_meta.setObjectName("hint")
         self.player_meta.setWordWrap(False)
         self.player_meta.setStyleSheet(
             "color:#b9c5d3;font-size:11px;padding:2px 4px;border:0;")
-        body.addWidget(self.player_meta)
+        self.resolution_label = QLabel("")
+        self.resolution_label.setObjectName("hint")
+        self.resolution_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.resolution_label.setStyleSheet(
+            "color:#b9c5d3;font-size:11px;padding:2px 4px;border:0;")
+        meta_row.addWidget(self.player_meta, 1)
+        meta_row.addWidget(self.resolution_label, 0)
+        body.addLayout(meta_row)
         self.side_panel = QFrame()
         self.side_panel.setMinimumWidth(0)
         self.side_panel.setMaximumWidth(16777215)
@@ -802,7 +838,7 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.stop_button)
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
-        self.volume_slider.setValue(100)
+        self.volume_slider.setValue(self.settings_data["volume"])
         self.volume_slider.setFixedWidth(72)
         self.volume_slider.setFocusPolicy(Qt.StrongFocus)
         self.volume_slider.setToolTip("Volume")
@@ -817,6 +853,15 @@ class MainWindow(QMainWindow):
         body.addWidget(self.controls_widget)
         body.addWidget(self.side_panel, 2)
         player_layout.addLayout(body, 1)
+        self.loading_bar = QProgressBar()
+        self.loading_bar.setRange(0, 0)
+        self.loading_bar.setTextVisible(False)
+        self.loading_bar.setFixedHeight(5)
+        self.loading_bar.setStyleSheet(
+            "QProgressBar{border:0;background:#273241;border-radius:2px;}"
+            "QProgressBar::chunk{background:#ff334f;border-radius:2px;}")
+        self.loading_bar.hide()
+        player_layout.addWidget(self.loading_bar)
         self.player_status = QLabel("Menyiapkan pemutar…")
         self.player_status.setObjectName("hint")
         player_layout.addWidget(self.player_status)
@@ -825,7 +870,7 @@ class MainWindow(QMainWindow):
 
         self.apply_safe_area()
         self.position_window_controls()
-        self.query.setFocus()
+        self.nav_buttons[0].setFocus()
         QApplication.instance().installEventFilter(self)
         self.show_side_panel("playlist")
         self.set_active_nav("home")
@@ -923,14 +968,27 @@ class MainWindow(QMainWindow):
     def select_section(self, mode):
         self.set_active_nav(mode)
         self.collapse_sidebar()
-        if mode == "search":
-            self.query.setFocus()
-            self.status.setText("Masukkan kata pencarian atau URL YouTube.")
-        elif mode in ("home", "trending"):
-            self.load_feed(mode)
+        if mode == "settings":
+            self.pages.setCurrentWidget(self.settings_page)
+            self.page_size_box.setFocus(Qt.OtherFocusReason)
         else:
-            self.results_heading.setText(mode.upper())
-            self.status.setText(f"Bagian {mode} belum tersedia.")
+            self.pages.setCurrentWidget(self.search_page)
+            if mode == "search":
+                self.query.setFocus(Qt.OtherFocusReason)
+                self.status.setText("Masukkan kata pencarian atau URL YouTube.")
+            elif mode in ("home", "trending"):
+                self.load_feed(mode)
+            else:
+                self.results_heading.setText(mode.upper())
+                self.status.setText(f"Bagian {mode} belum tersedia.")
+
+    def return_from_settings(self):
+        self.pages.setCurrentWidget(self.search_page)
+        self.set_active_nav("home")
+        if self.cards:
+            self.cards[0].setFocus(Qt.OtherFocusReason)
+        else:
+            self.nav_buttons[0].setFocus(Qt.OtherFocusReason)
 
     def load_feed(self, mode):
         if mode not in ("home", "trending"):
@@ -1103,6 +1161,8 @@ class MainWindow(QMainWindow):
 
     def change_page_size(self, value):
         self.page_size = int(value)
+        self.settings_data["page_size"] = self.page_size
+        save_app_settings(self.settings_data)
         self.current_page = 0
         if self.results:
             self.render_page()
