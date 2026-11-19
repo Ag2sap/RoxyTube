@@ -1273,6 +1273,7 @@ class MainWindow(QMainWindow):
                 not self.fallback_qualities):
             return False
         next_quality = self.fallback_qualities.pop(0)
+        self.set_mini_controls_enabled(False)
         self.player_process = None
         self.quality.blockSignals(True)
         self.quality.setCurrentText(next_quality)
@@ -1823,6 +1824,8 @@ class MainWindow(QMainWindow):
                                                 scroll_bar.value() - scroll_bar.singleStep()))
                         return True
                     if key == Qt.Key_Down:
+                        if scroll_bar.value() >= scroll_bar.maximum():
+                            self.description_button.setFocus(); return True
                         scroll_bar.setValue(min(scroll_bar.maximum(),
                                                 scroll_bar.value() + scroll_bar.singleStep()))
                         return True
