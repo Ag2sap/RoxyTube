@@ -9,7 +9,7 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDi
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea,
-    QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
+    QSizePolicy, QSlider, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 APP_NAME = "YouTube Roxy"
@@ -352,6 +352,9 @@ class MainWindow(QMainWindow):
         self.mpv_event_buffer = ""
         self.metadata_requested_index = None
         self.current_time_pos = 0.0
+        self.duration_seconds = 0.0
+        self.slider_dragging = False
+        self.playback_paused = False
         self.playback_started = False
         self.fallback_qualities = []
         self.setStyleSheet("""
@@ -547,13 +550,42 @@ class MainWindow(QMainWindow):
         body.addWidget(self.side_panel, 2)
         player_layout.addLayout(body, 1)
 
+        timeline = QHBoxLayout()
+        timeline.setSpacing(5)
+        self.elapsed_label = QLabel("0:00")
+        self.elapsed_label.setObjectName("hint")
+        self.elapsed_label.setMinimumWidth(35)
+        self.elapsed_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.seek_slider = QSlider(Qt.Horizontal)
+        self.seek_slider.setObjectName("playbackSlider")
+        self.seek_slider.setRange(0, 0)
+        self.seek_slider.setSingleStep(5)
+        self.seek_slider.setPageStep(15)
+        self.seek_slider.setFocusPolicy(Qt.StrongFocus)
+        self.seek_slider.setStyleSheet("""
+            QSlider#playbackSlider { min-height:22px; }
+            QSlider#playbackSlider::groove:horizontal { height:5px; background:#455365; border-radius:2px; }
+            QSlider#playbackSlider::sub-page:horizontal { background:#ff334f; border-radius:2px; }
+            QSlider#playbackSlider::handle:horizontal { background:#ffd166; width:13px; margin:-5px 0; border-radius:6px; }
+        """)
+        self.duration_label = QLabel("0:00")
+        self.duration_label.setObjectName("hint")
+        self.duration_label.setMinimumWidth(35)
+        self.seek_slider.sliderPressed.connect(self.seek_started)
+        self.seek_slider.sliderReleased.connect(self.seek_finished)
+        self.seek_slider.valueChanged.connect(self.seek_preview)
+        timeline.addWidget(self.elapsed_label)
+        timeline.addWidget(self.seek_slider, 1)
+        timeline.addWidget(self.duration_label)
+        player_layout.addLayout(timeline)
+
         controls = QHBoxLayout()
         self.previous_video_button = QPushButton("⏮")
         self.previous_video_button.setToolTip("Video sebelumnya")
         self.previous_video_button.clicked.connect(lambda: self.play_index(self.current_index - 1))
         self.play_pause_button = QPushButton("Ⅱ")
         self.play_pause_button.setToolTip("Jeda / lanjut")
-        self.play_pause_button.clicked.connect(lambda: self.mpv_command(["cycle", "pause"]))
+        self.play_pause_button.clicked.connect(self.toggle_play_pause)
         self.next_video_button = QPushButton("⏭")
         self.next_video_button.setToolTip("Video berikutnya")
         self.next_video_button.clicked.connect(lambda: self.play_index(self.current_index + 1))
@@ -583,6 +615,7 @@ class MainWindow(QMainWindow):
         self.player_status.setObjectName("hint")
         player_layout.addWidget(self.player_status)
         self.pages.addWidget(self.player_page)
+        self.set_playback_controls_enabled(False)
 
         self.apply_safe_area()
         self.query.setFocus()
@@ -605,7 +638,7 @@ class MainWindow(QMainWindow):
     def refresh_card_columns(self):
         if not hasattr(self, "scroll"):
             return
-        columns = 2
+        columns = 1 if self.feed_mode == "home" else 2
         for i, card in enumerate(self.cards):
             self.cards_grid.removeWidget(card)
             self.cards_grid.addWidget(card, i // columns, i % columns)
@@ -774,6 +807,7 @@ class MainWindow(QMainWindow):
                     "url": url, "title": entry.get("title") or "Video tanpa judul",
                     "channel": entry.get("channel") or entry.get("uploader") or "YouTube",
                     "thumbnail": thumbnail_url(entry), "duration": duration_text,
+                    "duration_seconds": float(duration or 0),
                     "description": entry.get("description") or "",
                 })
             if not self.results:
@@ -802,11 +836,11 @@ class MainWindow(QMainWindow):
         self.current_page = max(0, min(self.current_page, total_pages - 1))
         start = self.current_page * self.page_size
         end = min(len(self.results), start + self.page_size)
-        columns = 2
+        columns = 1 if self.feed_mode == "home" else 2
         for idx in range(start, end):
             result = self.results[idx]
             card = VideoCard(idx, result["title"], result["channel"], result["duration"], self.cards_host)
-            card.setMinimumHeight(250)
+            card.setMinimumHeight(310 if self.feed_mode == "home" else 250)
             card.on_activate = self.play_index
             card.installEventFilter(self)
             self.cards.append(card)
@@ -873,6 +907,11 @@ class MainWindow(QMainWindow):
         index = max(0, min(int(index), len(self.results) - 1))
         self.current_index = index
         self.current_time_pos = max(0.0, float(start_position or 0.0))
+        self.duration_seconds = float(self.results[index].get("duration_seconds") or 0)
+        self.update_timeline(self.current_time_pos, self.duration_seconds)
+        self.set_playback_controls_enabled(False)
+        self.playback_paused = False
+        self.play_pause_button.setText("Ⅱ")
         self.fallback_qualities = self.quality_fallbacks(self.quality.currentText())
         self.metadata_requested_index = None
         video = self.results[index]
@@ -937,7 +976,7 @@ class MainWindow(QMainWindow):
     def player_started(self, process):
         if process is self.player_process:
             self.player_status.setText("Mengambil stream video…")
-            self.stop_button.setEnabled(True)
+            self.set_playback_controls_enabled(True)
             self.mpv_event_attempts = 0
             QTimer.singleShot(250, lambda i=self.current_index, p=process:
                               self.connect_mpv_events(i, p))
@@ -984,7 +1023,12 @@ class MainWindow(QMainWindow):
         if sock is not self.mpv_event_socket:
             return
         # Observe time-pos as a fallback if the initial playback event was missed.
-        sock.write(b'{"command":["observe_property",1,"time-pos"]}\n')
+        for command in (
+            ["observe_property", 1, "time-pos"],
+            ["observe_property", 2, "duration"],
+            ["observe_property", 3, "pause"],
+        ):
+            sock.write(json.dumps({"command": command}).encode("utf-8") + b"\n")
         sock.flush()
 
     def read_mpv_events(self, sock, index, process):
@@ -1001,12 +1045,19 @@ class MainWindow(QMainWindow):
             if event == "playback-restart":
                 self.playback_started = True
                 self.schedule_metadata_after_start(index, process, 1200)
-            elif event == "property-change" and message.get("name") == "time-pos":
-                value = message.get("data")
-                if isinstance(value, (int, float)):
+            elif event == "property-change":
+                name, value = message.get("name"), message.get("data")
+                if name == "time-pos" and isinstance(value, (int, float)):
                     self.current_time_pos = max(0.0, float(value))
                     self.playback_started = True
-                self.schedule_metadata_after_start(index, process, 1200)
+                    self.update_timeline(self.current_time_pos, self.duration_seconds)
+                    self.schedule_metadata_after_start(index, process, 1200)
+                elif name == "duration" and isinstance(value, (int, float)):
+                    self.duration_seconds = max(0.0, float(value))
+                    self.update_timeline(self.current_time_pos, self.duration_seconds)
+                elif name == "pause" and isinstance(value, bool):
+                    self.playback_paused = value
+                    self.play_pause_button.setText("▶" if value else "Ⅱ")
 
     def schedule_metadata_after_start(self, index, process, delay_ms):
         if self.metadata_requested_index == index:
@@ -1064,6 +1115,10 @@ class MainWindow(QMainWindow):
             data = json.loads(bytes(process.readAllStandardOutput()).decode("utf-8", "replace"))
         except (json.JSONDecodeError, UnicodeDecodeError):
             return
+        if data.get("duration") is not None:
+            self.duration_seconds = max(0.0, float(data["duration"]))
+            self.results[index]["duration_seconds"] = self.duration_seconds
+            self.update_timeline(self.current_time_pos, self.duration_seconds)
         description = data.get("description") or self.results[index].get("description") or "Deskripsi tidak tersedia."
         self.results[index]["description"] = description
         self.show_side_panel("description", description)
@@ -1091,6 +1146,55 @@ class MainWindow(QMainWindow):
             self.player_status.setText("Subtitle tersedia. Pilih bahasa melalui CC.")
         else:
             self.player_status.setText("Subtitle tidak tersedia untuk video ini.")
+
+    @staticmethod
+    def format_time(seconds):
+        seconds = max(0, int(seconds or 0))
+        hours, remainder = divmod(seconds, 3600)
+        minutes, secs = divmod(remainder, 60)
+        return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+    def update_timeline(self, position, duration):
+        duration = max(0.0, float(duration or 0))
+        position = max(0.0, float(position or 0))
+        self.elapsed_label.setText(self.format_time(position))
+        self.duration_label.setText(self.format_time(duration))
+        if not self.slider_dragging:
+            self.seek_slider.blockSignals(True)
+            self.seek_slider.setRange(0, max(0, int(duration)))
+            self.seek_slider.setValue(min(int(position), int(duration)) if duration else 0)
+            self.seek_slider.blockSignals(False)
+        self.seek_slider.setEnabled(duration > 0 and self.player_process is not None and
+                                    self.player_process.state() != QProcess.NotRunning)
+
+    def seek_started(self):
+        self.slider_dragging = True
+
+    def seek_preview(self, value):
+        if self.slider_dragging:
+            self.elapsed_label.setText(self.format_time(value))
+
+    def seek_finished(self):
+        value = self.seek_slider.value()
+        self.slider_dragging = False
+        if self.duration_seconds > 0:
+            self.current_time_pos = float(value)
+            self.mpv_command(["seek", value, "absolute+exact"])
+            self.update_timeline(self.current_time_pos, self.duration_seconds)
+
+    def toggle_play_pause(self):
+        if not self.player_process or self.player_process.state() == QProcess.NotRunning:
+            return
+        self.mpv_command(["cycle", "pause"])
+        self.playback_paused = not self.playback_paused
+        self.play_pause_button.setText("▶" if self.playback_paused else "Ⅱ")
+
+    def set_playback_controls_enabled(self, enabled):
+        for widget in (self.previous_video_button, self.play_pause_button,
+                       self.next_video_button, self.seek_slider, self.quality,
+                       self.subtitle_box):
+            widget.setEnabled(bool(enabled))
+        self.stop_button.setEnabled(bool(enabled))
 
     def select_subtitle(self, index):
         track = self.subtitle_box.itemData(index)
@@ -1146,7 +1250,8 @@ class MainWindow(QMainWindow):
             self.player_process.terminate()
             QTimer.singleShot(700, lambda p=self.player_process: p.kill()
                               if p and p.state() != QProcess.NotRunning else None)
-        self.stop_button.setEnabled(False)
+        self.set_playback_controls_enabled(False)
+        self.slider_dragging = False
         self.pages.setCurrentWidget(self.search_page)
         if self.cards:
             self.cards[0].setFocus()
