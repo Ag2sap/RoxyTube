@@ -731,7 +731,7 @@ class MainWindow(QMainWindow):
         if not shutil.which(YTDLP):
             self.status.setText(f"yt-dlp tidak ditemukan: {YTDLP}")
             return
-        if self.search_process and self.search_process.state() != QProcess.NotRunning:
+        if self.process_is_running(self.search_process):
             self.search_process.kill()
         self.set_active_nav(mode)
         self.clear_cards()
@@ -768,7 +768,7 @@ class MainWindow(QMainWindow):
         if not shutil.which(YTDLP):
             QMessageBox.critical(self, APP_NAME, f"yt-dlp tidak ditemukan: {YTDLP}")
             return
-        if self.search_process and self.search_process.state() != QProcess.NotRunning:
+        if self.process_is_running(self.search_process):
             self.search_process.kill()
         self.search_button.setEnabled(False)
         self.clear_cards()
@@ -907,6 +907,16 @@ class MainWindow(QMainWindow):
             self.current_page = target
             self.render_page()
 
+    @staticmethod
+    def process_is_running(process):
+        """Return process state safely even if Qt has already deleted its C++ object."""
+        if process is None:
+            return False
+        try:
+            return process.state() != QProcess.NotRunning
+        except RuntimeError:
+            return False
+
     def quality_fallbacks(self, quality):
         if quality == "720p":
             return ["480p", "Auto"]
@@ -953,7 +963,7 @@ class MainWindow(QMainWindow):
         old_process = self.player_process
         self.player_process = None
         self.dispose_mpv_event_socket()
-        if old_process and old_process.state() != QProcess.NotRunning:
+        if self.process_is_running(old_process):
             old_process.kill()
         self.ipc_path = f"/tmp/roxy-youtube-tv-{os.getpid()}-{self.current_index}.sock"
         try:
@@ -987,7 +997,7 @@ class MainWindow(QMainWindow):
     def change_quality(self, quality):
         if self.pages.currentWidget() != self.player_page or not self.results:
             return
-        if not self.player_process or self.player_process.state() == QProcess.NotRunning:
+        if not self.process_is_running(self.player_process):
             return
         self.fallback_qualities = self.quality_fallbacks(quality)
         self.player_status.setText(f"Mengganti kualitas ke {quality}…")
@@ -1020,7 +1030,7 @@ class MainWindow(QMainWindow):
     def connect_mpv_events(self, index, process):
         """Connect to MPV IPC so metadata work starts only after playback begins."""
         if (process is not self.player_process or index != self.current_index or
-                process.state() == QProcess.NotRunning):
+                not self.process_is_running(process)):
             return
         self.dispose_mpv_event_socket()
         sock = QLocalSocket(self)
@@ -1100,7 +1110,7 @@ class MainWindow(QMainWindow):
         self.metadata_requested_index = index
         QTimer.singleShot(delay_ms, lambda i=index, p=process:
             self.fetch_metadata(i) if (                p is self.player_process and i == self.current_index and
-                p.state() != QProcess.NotRunning) else None)
+                self.process_is_running(p) else None)
 
     def retry_lower_quality(self, process, reason):
         if (process is not self.player_process or self.playback_started or
@@ -1120,20 +1130,27 @@ class MainWindow(QMainWindow):
         if process is self.player_process:
             if self.retry_lower_quality(process, "Stream gagal dibuka."):
                 return
+            # Do not keep a Python reference after Qt schedules this QProcess
+            # for deletion; later UI refreshes may otherwise query a dead wrapper.
+            self.player_process = None
             self.set_playback_controls_enabled(False)
             if self.pages.currentWidget() == self.player_page:
                 self.player_status.setText("Pemutaran selesai atau stream terputus.")
-        process.deleteLater()
+        try:
+            process.deleteLater()
+        except RuntimeError:
+            pass
 
     def player_error(self, process):
         if process is self.player_process:
             if self.retry_lower_quality(process, "MPV gagal membuka stream."):
                 return
+            self.player_process = None
             self.set_playback_controls_enabled(False)
             self.player_status.setText("MPV gagal dijalankan.")
 
     def fetch_metadata(self, index):
-        if self.metadata_process and self.metadata_process.state() != QProcess.NotRunning:
+        if self.process_is_running(self.metadata_process):
             self.metadata_process.kill()
         process = QProcess(self)
         self.metadata_process = process
@@ -1200,7 +1217,7 @@ class MainWindow(QMainWindow):
             self.seek_slider.setValue(min(int(position), int(duration)) if duration else 0)
             self.seek_slider.blockSignals(False)
         self.seek_slider.setEnabled(duration > 0 and self.player_process is not None and
-                                    self.player_process.state() != QProcess.NotRunning)
+                                    self.process_is_running(self.player_process))
 
     def seek_started(self):
         self.slider_dragging = True
@@ -1218,7 +1235,7 @@ class MainWindow(QMainWindow):
             self.update_timeline(self.current_time_pos, self.duration_seconds)
 
     def toggle_play_pause(self):
-        if not self.player_process or self.player_process.state() == QProcess.NotRunning:
+        if not self.process_is_running(self.player_process):
             return
         self.mpv_command(["cycle", "pause"])
         self.playback_paused = not self.playback_paused
@@ -1233,7 +1250,7 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(bool(enabled))
 
     def change_volume(self, value):
-        if self.player_process and self.player_process.state() != QProcess.NotRunning:
+        if self.process_is_running(self.player_process):
             self.mpv_command(["set_property", "volume", int(value)])
 
     def select_subtitle(self, index):
@@ -1244,7 +1261,7 @@ class MainWindow(QMainWindow):
         self.mpv_command(["sub-add", track["url"], "select", track["name"]])
 
     def mpv_command(self, command):
-        if not self.player_process or self.player_process.state() == QProcess.NotRunning:
+        if not self.process_is_running(self.player_process):
             return False
         payload = json.dumps({"command": command}).encode("utf-8") + b"\n"
         # Reuse the live event channel whenever possible. This avoids racing
@@ -1314,10 +1331,10 @@ class MainWindow(QMainWindow):
 
     def back_to_results(self):
         self.fallback_qualities.clear()
-        if self.player_process and self.player_process.state() != QProcess.NotRunning:
+        if self.process_is_running(self.player_process):
             self.player_process.terminate()
             QTimer.singleShot(700, lambda p=self.player_process: p.kill()
-                              if p and p.state() != QProcess.NotRunning else None)
+                              if self.process_is_running(p) else None)
         self.set_playback_controls_enabled(False)
         self.slider_dragging = False
         self.pages.setCurrentWidget(self.search_page)
@@ -1458,7 +1475,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         for process in (self.search_process, self.player_process, self.metadata_process):
-            if process and process.state() != QProcess.NotRunning:
+            if self.process_is_running(process):
                 process.terminate()
         try:
             Path(self.ipc_path).unlink(missing_ok=True)
