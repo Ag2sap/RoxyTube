@@ -1460,30 +1460,49 @@ class MainWindow(QMainWindow):
         self.playback_queue[index]["description"] = description
         self.show_side_panel("description", description)
         tracks = []
-        for source, label in ((data.get("subtitles") or {}, "Tersedia"),
+        format_priority = {"vtt": 0, "srt": 1, "ass": 2, "srv3": 3, "ttml": 4, "json3": 5}
+        for source, label in ((data.get("subtitles") or {}, "Asli"),
                               (data.get("automatic_captions") or {}, "Otomatis")):
             for lang, entries in source.items():
-                # Prefer WebVTT when YouTube exposes several encodings for one language.
-                item = next((entry for entry in entries
-                             if entry.get("url") and entry.get("ext") == "vtt"), None)
-                if item is None:
-                    item = next((entry for entry in entries
-                                 if entry.get("url") and entry.get("ext") in
-                                 ("srt", "ass", "srv3", "ttml", "json3")), None)
-                if item:
-                    tracks.append({"lang": lang, "name": item.get("name") or lang,
-                                   "source": label, "url": item["url"]})
+                candidates = [
+                    entry for entry in (entries or [])
+                    if entry.get("url") and entry.get("ext") in format_priority
+                ]
+                if not candidates:
+                    continue
+                item = min(candidates, key=lambda entry: format_priority.get(entry.get("ext"), 99))
+                tracks.append({
+                    "lang": lang,
+                    "name": item.get("name") or lang,
+                    "source": label,
+                    "format": item.get("ext") or "",
+                    "url": item["url"],
+                })
+        selected_key = None
+        if self.selected_subtitle_track:
+            selected_key = (
+                self.selected_subtitle_track.get("lang"),
+                self.selected_subtitle_track.get("source"),
+            )
         self.subtitle_box.blockSignals(True)
         self.subtitle_box.clear()
         self.subtitle_box.addItem("Subtitle: Off", None)
-        # Indonesian first, then other languages.
-        tracks.sort(key=lambda x: (0 if x["lang"] == "id" or x["lang"].startswith("id-") else 1,
-                                   x["source"] != "Tersedia", x["lang"]))
+        # Indonesian first; manual/original tracks precede auto-generated tracks.
+        tracks.sort(key=lambda x: (
+            0 if x["lang"] == "id" or x["lang"].startswith("id-") else 1,
+            x["source"] != "Asli", x["lang"], x["name"]
+        ))
+        selected_index = 0
         for track in tracks:
-            self.subtitle_box.addItem(f"{track['name']} ({track['source']})", track)
+            self.subtitle_box.addItem(f"{track['name']} · {track['source']}", track)
+            if selected_key == (track["lang"], track["source"]):
+                selected_index = self.subtitle_box.count() - 1
+        self.subtitle_box.setCurrentIndex(selected_index)
         self.subtitle_box.blockSignals(False)
         if tracks:
-            self.player_status.setText("Subtitle tersedia. Pilih bahasa melalui CC.")
+            self.player_status.setText(
+                f"{len(tracks)} track subtitle tersedia (asli dan otomatis bila ada)."
+            )
         else:
             self.selected_subtitle_track = None
             self.player_status.setText("Subtitle tidak tersedia untuk video ini.")
