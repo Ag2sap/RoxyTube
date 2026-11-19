@@ -511,6 +511,12 @@ class MainWindow(QMainWindow):
         self.video_surface.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.video_surface.setStyleSheet("background:#000000;border:1px solid #384354;")
         body.addWidget(self.video_surface, 5)
+        self.player_meta = QLabel("")
+        self.player_meta.setObjectName("hint")
+        self.player_meta.setWordWrap(False)
+        self.player_meta.setStyleSheet(
+            "color:#b9c5d3;font-size:11px;padding:2px 4px;border:0;")
+        body.addWidget(self.player_meta)
         self.side_panel = QFrame()
         self.side_panel.setMinimumWidth(0)
         self.side_panel.setMaximumWidth(16777215)
@@ -871,6 +877,9 @@ class MainWindow(QMainWindow):
         self.metadata_requested_index = None
         video = self.results[index]
         self.player_title.setText(video["title"])
+        channel = video.get("channel") or "YouTube"
+        duration = video.get("duration") or ""
+        self.player_meta.setText(f"{channel}  •  {duration}" if duration else channel)
         self.player_status.setText("Menghubungkan ke YouTube…")
         self.subtitle_box.blockSignals(True)
         self.subtitle_box.clear()
