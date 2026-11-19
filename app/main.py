@@ -359,6 +359,8 @@ class MainWindow(QMainWindow):
         self.playback_started = False
         self.manual_stop = False
         self.selected_subtitle_track = None
+        self.subtitle_applied_process = None
+        self.subtitle_applied_track = None
         self.is_playback_fullscreen = False
         self.fullscreen_controls_visible = False
         self.fullscreen_hide_timer = QTimer(self)
@@ -1074,6 +1076,8 @@ class MainWindow(QMainWindow):
         self.set_mini_controls_enabled(False)
         self.manual_stop = False
         self.selected_subtitle_track = None
+        self.subtitle_applied_process = None
+        self.subtitle_applied_track = None
         self.current_time_pos = max(0.0, float(start_position or 0.0))
         self.duration_seconds = float(self.playback_queue[index].get("duration_seconds") or 0)
         self.update_timeline(self.current_time_pos, self.duration_seconds)
@@ -1235,8 +1239,6 @@ class MainWindow(QMainWindow):
         ):
             sock.write(json.dumps({"command": command}).encode("utf-8") + b"\n")
         sock.flush()
-        if self.selected_subtitle_track:
-            QTimer.singleShot(350, self.apply_selected_subtitle)
 
     def read_mpv_events(self, sock, index, process):
         if sock is not self.mpv_event_socket:
@@ -1252,6 +1254,9 @@ class MainWindow(QMainWindow):
             if event == "playback-restart":
                 self.playback_started = True
                 self.schedule_metadata_after_start(index, process, 1200)
+                if (self.selected_subtitle_track and
+                        self.subtitle_applied_process is not process):
+                    QTimer.singleShot(300, self.apply_selected_subtitle)
             elif event == "property-change":
                 name, value = message.get("name"), message.get("data")
                 if name == "time-pos" and isinstance(value, (int, float)):
@@ -1488,6 +1493,8 @@ class MainWindow(QMainWindow):
     def select_subtitle(self, index):
         track = self.subtitle_box.itemData(index)
         self.selected_subtitle_track = track
+        self.subtitle_applied_process = None
+        self.subtitle_applied_track = None
         if not track:
             self.mpv_command(["set_property", "sid", "no"])
             self.mpv_command(["set_property", "sub-visibility", False])
@@ -1497,7 +1504,10 @@ class MainWindow(QMainWindow):
     def apply_selected_subtitle(self):
         """Apply the chosen external track to the currently active MPV session."""
         track = self.selected_subtitle_track
-        if not track or not self.process_is_running(self.player_process):
+        process = self.player_process
+        if not track or not self.process_is_running(process):
+            return
+        if self.subtitle_applied_process is process and self.subtitle_applied_track == track:
             return
         if not self.mpv_command([
             "sub-add", track["url"], "select", track["name"], track["lang"]
@@ -1505,6 +1515,8 @@ class MainWindow(QMainWindow):
             self.player_status.setText("Subtitle belum dapat diterapkan ke MPV.")
             return
         self.mpv_command(["set_property", "sub-visibility", True])
+        self.subtitle_applied_process = process
+        self.subtitle_applied_track = track
         self.player_status.setText(f"Subtitle aktif: {track['name']}")
 
     def mpv_command(self, command):
@@ -1598,6 +1610,8 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(700, lambda p=process: p.kill()
                               if self.process_is_running(p) else None)
         self.selected_subtitle_track = None
+        self.subtitle_applied_process = None
+        self.subtitle_applied_track = None
         self.current_time_pos = 0.0
         self.playback_started = False
         self.set_playback_controls_enabled(False)
