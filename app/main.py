@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt, QProcess, QUrl, QSize
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
 
@@ -53,6 +53,62 @@ def video_url(entry):
     return None
 
 
+
+class VirtualKeyboardDialog(QDialog):
+    """Large on-screen keyboard designed for D-pad navigation."""
+    def __init__(self, target, parent=None):
+        super().__init__(parent)
+        self.target = target
+        self.setWindowTitle("Keyboard Roxy")
+        self.setMinimumSize(600, 390)
+        self.setStyleSheet("""
+            QDialog { background:#151b24; color:white; }
+            QPushButton { background:#303c4d; color:white; border:2px solid #536176;
+                border-radius:7px; padding:9px; font-size:18px; min-width:34px; min-height:34px; }
+            QPushButton:focus { background:#526781; border:3px solid #ffd166; }
+        """)
+        layout = QVBoxLayout(self)
+        self.preview = QLineEdit(target.text())
+        self.preview.setReadOnly(True)
+        self.preview.setStyleSheet("font-size:20px; padding:9px;")
+        layout.addWidget(self.preview)
+        grid = QGridLayout()
+        grid.setSpacing(5)
+        layout.addLayout(grid)
+        rows = ["1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"]
+        for row_index, chars in enumerate(rows):
+            offset = 0 if row_index < 2 else (1 if row_index == 2 else 2)
+            for col, char in enumerate(chars):
+                button = QPushButton(char)
+                button.clicked.connect(lambda checked=False, key=char: self.add_text(key))
+                grid.addWidget(button, row_index, col + offset)
+        actions = [
+            ("SPASI", lambda: self.add_text(" "), 4),
+            ("HAPUS", self.backspace, 2),
+            ("KOSONGKAN", self.clear_text, 2),
+            ("SELESAI", self.accept, 2),
+        ]
+        row_index = len(rows)
+        for label, callback, span in actions:
+            button = QPushButton(label)
+            button.clicked.connect(callback)
+            grid.addWidget(button, row_index, 0, 1, span)
+            row_index += 1
+
+    def add_text(self, value):
+        self.preview.setText(self.preview.text() + value)
+
+    def backspace(self):
+        self.preview.setText(self.preview.text()[:-1])
+
+    def clear_text(self):
+        self.preview.clear()
+
+    def accept(self):
+        self.target.setText(self.preview.text())
+        super().accept()
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -88,14 +144,23 @@ class MainWindow(QMainWindow):
         hint = QLabel("Cari video YouTube • navigasi dengan tombol arah / remote")
         hint.setObjectName("hint")
         self.root_layout.addWidget(hint)
+        top_row = QHBoxLayout()
+        top_row.addStretch(1)
+        self.minimize_button = QPushButton("MINIMIZE")
+        self.minimize_button.clicked.connect(self.showMinimized)
+        top_row.addWidget(self.minimize_button)
+        self.root_layout.addLayout(top_row)
 
         search_row = QHBoxLayout()
         self.query = QLineEdit()
         self.query.setPlaceholderText("Masukkan kata pencarian atau URL YouTube…")
         self.query.returnPressed.connect(self.search)
+        self.keyboard_button = QPushButton("KEYBOARD")
+        self.keyboard_button.clicked.connect(self.open_keyboard)
         self.search_button = QPushButton("CARI")
         self.search_button.clicked.connect(self.search)
         search_row.addWidget(self.query, 1)
+        search_row.addWidget(self.keyboard_button)
         search_row.addWidget(self.search_button)
         self.root_layout.addLayout(search_row)
 
@@ -131,6 +196,11 @@ class MainWindow(QMainWindow):
         root.setLayout(self.root_layout)
         self.setCentralWidget(root)
         self.apply_safe_area()
+        self.query.setFocus()
+
+    def open_keyboard(self):
+        dialog = VirtualKeyboardDialog(self.query, self)
+        dialog.exec()
         self.query.setFocus()
 
     def apply_safe_area(self):
