@@ -129,6 +129,9 @@ class MainWindow(QMainWindow):
         self.mpv_event_attempts = 0
         self.mpv_event_buffer = ""
         self.metadata_requested_index = None
+        self.current_time_pos = 0.0
+        self.playback_started = False
+        self.fallback_qualities = []
         self.setStyleSheet("""
             QMainWindow, QWidget { background:#101318; color:#f4f6f8; font-family:Sans; }
             QLabel#brand { color:#ffffff; font-size:17px; font-weight:750; }
@@ -162,11 +165,6 @@ class MainWindow(QMainWindow):
         header.addWidget(logo)
         header.addWidget(brand)
         header.addStretch(1)
-        header.addWidget(QLabel("Kualitas"))
-        self.quality = QComboBox()
-        self.quality.addItems(list(QUALITY_FORMATS))
-        self.quality.setMaximumWidth(85)
-        header.addWidget(self.quality)
         self.root_layout.addLayout(header)
 
         search_row = QHBoxLayout()
@@ -207,8 +205,7 @@ class MainWindow(QMainWindow):
         self.backspace_key.clicked.connect(self.backspace_query)
         keyboard_layout.addWidget(self.backspace_key, 4, 6, 1, 2)
         self.done_key = QPushButton("✓")
-        self.done_key.setToolTip("Tutup keyboard")
-        self.done_key.clicked.connect(self.toggle_keyboard)
+        self.done_key.setToolTip("Tutup keyboard")        self.done_key.clicked.connect(self.toggle_keyboard)
         keyboard_layout.addWidget(self.done_key, 4, 8, 1, 2)
         self.keyboard_widget.setVisible(False)
         self.root_layout.addWidget(self.keyboard_widget)
@@ -318,14 +315,21 @@ class MainWindow(QMainWindow):
         self.stop_button.setToolTip("Stop dan kembali")
         self.stop_button.clicked.connect(self.back_to_results)
         self.subtitle_box = QComboBox()
-        self.subtitle_box.setMinimumWidth(115)
+        self.subtitle_box.setMinimumWidth(105)
         self.subtitle_box.addItem("Subtitle: Off", None)
         self.subtitle_box.currentIndexChanged.connect(self.select_subtitle)
+        self.quality = QComboBox()
+        self.quality.addItems(list(QUALITY_FORMATS))
+        self.quality.setCurrentText("720p")
+        self.quality.setMinimumWidth(75)
+        self.quality.currentTextChanged.connect(self.change_quality)
         controls.addWidget(self.previous_video_button)
         controls.addWidget(self.play_pause_button)
         controls.addWidget(self.next_video_button)
         controls.addWidget(self.stop_button)
         controls.addStretch(1)
+        controls.addWidget(QLabel("Kualitas"))
+        controls.addWidget(self.quality)
         controls.addWidget(QLabel("CC"))
         controls.addWidget(self.subtitle_box)
         player_layout.addLayout(controls)
@@ -417,8 +421,7 @@ class MainWindow(QMainWindow):
 
     def search_finished(self, process, exit_code, _exit_status):
         raw = bytes(process.readAllStandardOutput()).decode("utf-8", "replace")
-        err = bytes(process.readAllStandardError()).decode("utf-8", "replace")
-        if process is not self.search_process:
+        err = bytes(process.readAllStandardError()).decode("utf-8", "replace")        if process is not self.search_process:
             return
         self.search_button.setEnabled(True)
         if exit_code != 0 or not raw.strip():
@@ -509,11 +512,23 @@ class MainWindow(QMainWindow):
             self.current_page = target
             self.render_page()
 
-    def play_index(self, index):
+    def quality_fallbacks(self, quality):
+        if quality == "720p":
+            return ["480p", "Auto"]
+        if quality == "480p":
+            return ["Auto"]
+        if quality == "360p":
+            return ["Auto"]
+        return []
+
+    def play_index(self, index, start_position=0.0):
         if not self.results:
             return
         index = max(0, min(int(index), len(self.results) - 1))
         self.current_index = index
+        self.current_time_pos = max(0.0, float(start_position or 0.0))
+        self.fallback_qualities = self.quality_fallbacks(self.quality.currentText())
+        self.metadata_requested_index = None
         video = self.results[index]
         self.player_title.setText(video["title"])
         self.player_status.setText("Menghubungkan ke YouTube…")
@@ -524,14 +539,19 @@ class MainWindow(QMainWindow):
         self.show_side_panel("playlist")
         self.populate_playlist()
         self.pages.setCurrentWidget(self.player_page)
-        self.video_surface.winId()  # Force creation of a native X11 child window.
-        if self.player_process and self.player_process.state() != QProcess.NotRunning:
-            self.player_process.kill()
+        self.video_surface.winId()
+        self._launch_player()
+
+    def _launch_player(self):
         if not shutil.which(MPV):
             QMessageBox.critical(self, APP_NAME, f"mpv tidak ditemukan: {MPV}")
             self.back_to_results()
             return
-        self.ipc_path = f"/tmp/roxy-youtube-tv-{os.getpid()}-{index}.sock"
+        old_process = self.player_process
+        self.player_process = None
+        if old_process and old_process.state() != QProcess.NotRunning:
+            old_process.kill()
+        self.ipc_path = f"/tmp/roxy-youtube-tv-{os.getpid()}-{self.current_index}.sock"
         try:
             Path(self.ipc_path).unlink(missing_ok=True)
         except OSError:
@@ -541,17 +561,29 @@ class MainWindow(QMainWindow):
         args = ["--no-osc", "--force-window=yes", f"--wid={int(self.video_surface.winId())}",
                 f"--input-ipc-server={self.ipc_path}",
                 f"--ytdl-format={QUALITY_FORMATS[self.quality.currentText()]}",
-                # Avoid MPV's yt-dlp hook fetching every subtitle track before first frame.
-                "--ytdl-raw-options=sub-langs=none,no-check-formats=",
-                "--keep-open=no", video["url"]]
+                # Keep subtitle enumeration out of the startup path; metadata is fetched later.
+                "--ytdl-raw-options=sub-langs=none",
+                "--keep-open=no"]
+        if self.current_time_pos > 0.5:
+            args.append(f"--start={self.current_time_pos:.2f}")
+        args.append(self.results[self.current_index]["url"])
         process.setProgram(MPV)
         process.setArguments(args)
         process.started.connect(lambda p=process: self.player_started(p))
         process.finished.connect(lambda code, _status, p=process: self.player_finished(p, code))
         process.errorOccurred.connect(lambda _err, p=process: self.player_error(p))
-        self.metadata_requested_index = None
+        self.playback_started = False
         process.start()
-        self.player_status.setText("Menyiapkan koneksi video…")
+        self.player_status.setText(f"Mencoba kualitas {self.quality.currentText()}…")
+
+    def change_quality(self, quality):
+        if self.pages.currentWidget() != self.player_page or not self.results:
+            return
+        if not self.player_process or self.player_process.state() == QProcess.NotRunning:
+            return
+        self.fallback_qualities = self.quality_fallbacks(quality)
+        self.player_status.setText(f"Mengganti kualitas ke {quality}…")
+        self._launch_player()
 
     def player_started(self, process):
         if process is self.player_process:
@@ -618,8 +650,13 @@ class MainWindow(QMainWindow):
                 continue
             event = message.get("event")
             if event == "playback-restart":
+                self.playback_started = True
                 self.schedule_metadata_after_start(index, process, 1200)
             elif event == "property-change" and message.get("name") == "time-pos":
+                value = message.get("data")
+                if isinstance(value, (int, float)):
+                    self.current_time_pos = max(0.0, float(value))
+                    self.playback_started = True
                 self.schedule_metadata_after_start(index, process, 1200)
 
     def schedule_metadata_after_start(self, index, process, delay_ms):
@@ -627,19 +664,36 @@ class MainWindow(QMainWindow):
             return
         self.metadata_requested_index = index
         QTimer.singleShot(delay_ms, lambda i=index, p=process:
-            self.fetch_metadata(i) if (
-                p is self.player_process and i == self.current_index and
+            self.fetch_metadata(i) if (                p is self.player_process and i == self.current_index and
                 p.state() != QProcess.NotRunning) else None)
+
+    def retry_lower_quality(self, process, reason):
+        if (process is not self.player_process or self.playback_started or
+                not self.fallback_qualities or self.pages.currentWidget() != self.player_page):
+            return False
+        next_quality = self.fallback_qualities.pop(0)
+        self.player_process = None
+        self.quality.blockSignals(True)
+        self.quality.setCurrentText(next_quality)
+        self.quality.blockSignals(False)
+        self.player_status.setText(f"{reason} Mencoba {next_quality}…")
+        process.deleteLater()
+        QTimer.singleShot(450, self._launch_player)
+        return True
 
     def player_finished(self, process, exit_code):
         if process is self.player_process:
+            if self.retry_lower_quality(process, "Stream gagal dibuka."):
+                return
             self.stop_button.setEnabled(False)
             if self.pages.currentWidget() == self.player_page:
-                self.player_status.setText("Pemutaran selesai.")
+                self.player_status.setText("Pemutaran selesai atau stream terputus.")
         process.deleteLater()
 
     def player_error(self, process):
         if process is self.player_process:
+            if self.retry_lower_quality(process, "MPV gagal membuka stream."):
+                return
             self.stop_button.setEnabled(False)
             self.player_status.setText("MPV gagal dijalankan.")
 
@@ -738,6 +792,7 @@ class MainWindow(QMainWindow):
                 item.widget().deleteLater()
 
     def back_to_results(self):
+        self.fallback_qualities.clear()
         if self.player_process and self.player_process.state() != QProcess.NotRunning:
             self.player_process.terminate()
             QTimer.singleShot(700, lambda p=self.player_process: p.kill()
