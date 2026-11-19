@@ -607,6 +607,15 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.play_pause_button)
         controls.addWidget(self.next_video_button)
         controls.addWidget(self.stop_button)
+        self.volume_slider = QSlider(Qt.Horizontal)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(100)
+        self.volume_slider.setFixedWidth(72)
+        self.volume_slider.setFocusPolicy(Qt.StrongFocus)
+        self.volume_slider.setToolTip("Volume")
+        self.volume_slider.valueChanged.connect(self.change_volume)
+        controls.addWidget(QLabel("🔊"))
+        controls.addWidget(self.volume_slider)
         controls.addStretch(1)
         controls.addWidget(QLabel("Kualitas"))
         controls.addWidget(self.quality)
@@ -1192,11 +1201,16 @@ class MainWindow(QMainWindow):
         self.play_pause_button.setText("▶" if self.playback_paused else "Ⅱ")
 
     def set_playback_controls_enabled(self, enabled):
-        for widget in (self.previous_video_button, self.play_pause_button,
-                       self.next_video_button, self.seek_slider, self.quality,
-                       self.subtitle_box):
+        for widget in (self.play_pause_button, self.seek_slider, self.volume_slider,
+                       self.quality, self.subtitle_box):
             widget.setEnabled(bool(enabled))
+        self.previous_video_button.setEnabled(bool(enabled) and self.current_index > 0)
+        self.next_video_button.setEnabled(bool(enabled) and self.current_index + 1 < len(self.results))
         self.stop_button.setEnabled(bool(enabled))
+
+    def change_volume(self, value):
+        if self.player_process and self.player_process.state() != QProcess.NotRunning:
+            self.mpv_command(["set_property", "volume", int(value)])
 
     def select_subtitle(self, index):
         track = self.subtitle_box.itemData(index)
@@ -1282,23 +1296,31 @@ class MainWindow(QMainWindow):
                 if key in (Qt.Key_Escape, Qt.Key_Back):
                     self.back_to_results()
                     return True
-                if focus is self.seek_slider:
+                if focus in (self.seek_slider, self.volume_slider):
                     if key in (Qt.Key_Left, Qt.Key_Right):
-                        step = 10 if QApplication.keyboardModifiers() & Qt.ShiftModifier else 5
-                        target = self.seek_slider.value() + (step if key == Qt.Key_Right else -step)
-                        target = max(0, min(int(self.duration_seconds), target))
-                        self.seek_slider.setValue(target)
-                        self.current_time_pos = float(target)
-                        self.mpv_command(["seek", target, "absolute+exact"])
-                        self.elapsed_label.setText(self.format_time(target))
+                        if focus is self.seek_slider:
+                            step = 10 if QApplication.keyboardModifiers() & Qt.ShiftModifier else 5
+                            target = self.seek_slider.value() + (step if key == Qt.Key_Right else -step)
+                            target = max(0, min(int(self.duration_seconds), target))
+                            self.seek_slider.setValue(target)
+                            self.current_time_pos = float(target)
+                            self.mpv_command(["seek", target, "absolute+exact"])
+                            self.elapsed_label.setText(self.format_time(target))
+                        else:
+                            step = 5
+                            self.volume_slider.setValue(max(0, min(100,
+                                self.volume_slider.value() + (step if key == Qt.Key_Right else -step))))
                         return True
                     if key == Qt.Key_Down:
                         self.previous_video_button.setFocus()
                         return True
+                    if key == Qt.Key_Up and focus is self.volume_slider:
+                        self.seek_slider.setFocus()
+                        return True
                 if focus in (self.previous_video_button, self.play_pause_button,
                              self.next_video_button, self.stop_button):
                     row = [self.previous_video_button, self.play_pause_button,
-                           self.next_video_button, self.stop_button]
+                           self.next_video_button, self.stop_button, self.volume_slider]
                     pos = row.index(focus)
                     if key == Qt.Key_Left and pos > 0:
                         row[pos - 1].setFocus(); return True
