@@ -1085,7 +1085,7 @@ class MainWindow(QMainWindow):
         if process is self.player_process:
             if self.retry_lower_quality(process, "Stream gagal dibuka."):
                 return
-            self.stop_button.setEnabled(False)
+            self.set_playback_controls_enabled(False)
             if self.pages.currentWidget() == self.player_page:
                 self.player_status.setText("Pemutaran selesai atau stream terputus.")
         process.deleteLater()
@@ -1094,7 +1094,7 @@ class MainWindow(QMainWindow):
         if process is self.player_process:
             if self.retry_lower_quality(process, "MPV gagal membuka stream."):
                 return
-            self.stop_button.setEnabled(False)
+            self.set_playback_controls_enabled(False)
             self.player_status.setText("MPV gagal dijalankan.")
 
     def fetch_metadata(self, index):
@@ -1204,14 +1204,22 @@ class MainWindow(QMainWindow):
         self.mpv_command(["sub-add", track["url"], "select", track["name"]])
 
     def mpv_command(self, command):
+        if not self.player_process or self.player_process.state() == QProcess.NotRunning:
+            return False
         socket = QLocalSocket(self)
         socket.connectToServer(self.ipc_path)
-        if socket.waitForConnected(250):
-            payload = json.dumps({"command": command}).encode("utf-8") + b"\n"
-            socket.write(payload)
-            socket.flush()
-            socket.disconnectFromServer()
+        if not socket.waitForConnected(500):
+            socket.deleteLater()
+            return False
+        payload = json.dumps({"command": command}).encode("utf-8") + b"\n"
+        written = socket.write(payload)
+        if written < 0 or not socket.waitForBytesWritten(500):
+            socket.abort()
+            socket.deleteLater()
+            return False
+        socket.disconnectFromServer()
         socket.deleteLater()
+        return True
 
     def populate_playlist(self):
         self.clear_side_content()
@@ -1303,7 +1311,7 @@ class MainWindow(QMainWindow):
                         self.select_section(self.nav_modes[nav_index]); return True
                 if focus in self.cards:
                     idx = self.cards.index(focus)
-                    cols = 2
+                    cols = 1 if self.feed_mode == "home" else 2
                     if key == Qt.Key_Left and idx % cols == 0:
                         self.expand_sidebar()
                         active = self.nav_modes.index(self.feed_mode) if self.feed_mode in self.nav_modes else 0
