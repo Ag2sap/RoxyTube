@@ -107,6 +107,11 @@ class TvKeyboard(QWidget):
         clear_button.installEventFilter(self)
         utility.addWidget(clear_button)
         self.box.addLayout(utility)
+        self.buttons.append(clear_button)
+        self.key_items.append({
+            "button": clear_button, "row": -1, "col": 8,
+            "span": 2, "center": 9.0,
+        })
 
         grid = QGridLayout()
         grid.setSpacing(4)
@@ -156,7 +161,7 @@ class TvKeyboard(QWidget):
             special = [
                 ("ABC", 2, self.toggle_symbols, False),
                 ("CAPS" if not self.caps_locked else "CAPS ✓", 1, self.toggle_caps, self.caps_locked),
-                ("SPASI", 3, lambda: self.insert(" "), False),
+                ("SPASI", 4, lambda: self.insert(" "), False),
                 ("⌫", 1, self.backspace, False),
                 ("SELESAI", 2, self.finish, False),
             ]
@@ -195,7 +200,7 @@ class TvKeyboard(QWidget):
                         return True
                 elif key in (Qt.Key_Up, Qt.Key_Down):
                     next_row = item["row"] + (-1 if key == Qt.Key_Up else 1)
-                    if next_row < 0:
+                    if next_row < -1:
                         self.target.setFocus()
                         event.accept()
                         return True
@@ -214,9 +219,13 @@ class TvKeyboard(QWidget):
         pos = self.target.cursorPosition()
         self.target.setText(self.target.text()[:pos] + value + self.target.text()[pos:])
         self.target.setCursorPosition(pos + len(value))
+        current = next(
+            (x for x in self.key_items if x["button"] is self.focusWidget()),
+            {"row": 1, "col": 0},
+        )
         if value and value[-1:].isalpha() and not self.symbol_mode and self.shift_once:
             self.shift_once = False
-            self.build_keys((1, 0))
+            self.build_keys((current["row"], current["col"]))
 
     def backspace(self):
         pos = self.target.cursorPosition()
