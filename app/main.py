@@ -1312,7 +1312,7 @@ class MainWindow(QMainWindow):
                                 self.volume_slider.value() + (step if key == Qt.Key_Right else -step))))
                         return True
                     if key == Qt.Key_Down:
-                        self.previous_video_button.setFocus()
+                        (self.quality if focus is self.volume_slider else self.previous_video_button).setFocus()
                         return True
                     if key == Qt.Key_Up and focus is self.volume_slider:
                         self.seek_slider.setFocus()
