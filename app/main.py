@@ -1914,8 +1914,6 @@ class MainWindow(QMainWindow):
         details = [self.current_channel or "YouTube"]
         if self.current_duration_label:
             details.append(self.current_duration_label)
-        if self.stream_width > 0 and self.stream_height > 0:
-            details.append(f"{self.stream_width}×{self.stream_height} ({self.stream_height}p)")
         self.player_meta.setText("  •  ".join(details))
         self.resolution_label.setText(
             f"{self.stream_width}×{self.stream_height} ({self.stream_height}p)"
