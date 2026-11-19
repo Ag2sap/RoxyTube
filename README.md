@@ -13,6 +13,7 @@ A lightweight YouTube TV-style frontend for HG680P / Armbian Noble (ARM64).
 - Android-TV-inspired keyboard rows with letters, digits, persistent CAPS, one-shot SHIFT, symbol page, comma, period, punctuation, space, backspace, and clear.
 - Search results shown as large 16:9 thumbnail cards in a two-column grid on 4:3 layouts, with title, channel/artist and duration.
 - D-pad navigation across search controls, keyboard and thumbnail cards.
+- PlasmaTube-inspired watch page: prominent embedded video, playback controls, quality/subtitle actions, and a lower queue/description panel.
 - Video playback through system MPV.
 - Quality preference: Auto, 360p, 480p, 720p (limited by formats YouTube exposes).
 
@@ -44,6 +45,7 @@ Example:
 
 ## Limitations
 
+- Public home and popular-video feeds use yt-dlp YouTube search queries because personal recommendations require account context and YouTube retired its old Trending feed endpoint. The Trending section is a public relevance-search approximation, not an official YouTube Trending ranking.
 - Search depends on yt-dlp's YouTube extractor and may be affected by YouTube changes, rate limits, or access challenges.
 - A selected quality is a maximum-height preference, not a guarantee the exact resolution exists.
 - Thumbnail loading depends on the image URL returned by YouTube/yt-dlp.
