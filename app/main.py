@@ -1791,7 +1791,7 @@ class MainWindow(QMainWindow):
                         self.seek_slider.setFocus(); return True
                     if key == Qt.Key_Down:
                         self.playlist_button.setFocus(); return True
-                if focus is self.side_content.viewport():
+                if focus in (self.side_content, self.side_content.viewport()):
                     scroll_bar = self.side_content.verticalScrollBar()
                     if key == Qt.Key_Up:
                         if scroll_bar.value() <= scroll_bar.minimum():
@@ -1833,6 +1833,8 @@ class MainWindow(QMainWindow):
                 if focus is self.mini_title_button and self.mini_player.isVisible():
                     if key == Qt.Key_Down:
                         self.mini_rewind_button.setFocus(); return True
+                    if key == Qt.Key_Right:
+                        self.minimize_button.setFocus(); return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                         self.return_to_playback(); return True
                 if focus in mini_buttons:
@@ -1849,6 +1851,19 @@ class MainWindow(QMainWindow):
                         else:
                             self.query.setFocus()
                         return True
+                if focus is self.minimize_button:
+                    if key == Qt.Key_Right:
+                        self.close_button.setFocus(); return True
+                    if key == Qt.Key_Left:
+                        (self.mini_title_button if self.mini_player.isVisible()
+                         else self.query).setFocus(); return True
+                    if key == Qt.Key_Down:
+                        self.query.setFocus(); return True
+                if focus is self.close_button:
+                    if key == Qt.Key_Left:
+                        self.minimize_button.setFocus(); return True
+                    if key == Qt.Key_Down:
+                        self.query.setFocus(); return True
                 if key in (Qt.Key_Escape, Qt.Key_Back):
                     if self.keyboard_open:
                         self.set_keyboard_visible(False)
@@ -1889,8 +1904,10 @@ class MainWindow(QMainWindow):
                         self.query.setFocus(); return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                         self.play_index(idx); return True
-                if focus is self.query and key == Qt.Key_Up and self.mini_player.isVisible():
-                    self.mini_title_button.setFocus(); return True
+                if focus is self.query and key == Qt.Key_Up:
+                    (self.mini_title_button if self.mini_player.isVisible()
+                     else self.minimize_button).setFocus()
+                    return True
                 if focus is self.query and key == Qt.Key_Left:
                     self.expand_sidebar()
                     self.nav_buttons[1].setFocus()
