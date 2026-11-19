@@ -487,7 +487,6 @@ class MainWindow(QMainWindow):
         if self.search_process and self.search_process.state() != QProcess.NotRunning:
             self.search_process.kill()
         self.set_active_nav(mode)
-        self.collapse_sidebar()
         self.clear_cards()
         self.results = []
         self.current_page = 0
@@ -983,6 +982,7 @@ class MainWindow(QMainWindow):
                     if key == Qt.Key_Up and nav_index > 0:
                         self.nav_buttons[nav_index - 1].setFocus(); return True
                     if key == Qt.Key_Right:
+                        self.collapse_sidebar()
                         if self.feed_mode == "search":
                             self.query.setFocus()
                         elif self.cards:
