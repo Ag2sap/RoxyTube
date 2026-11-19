@@ -24,7 +24,13 @@ Follow PlasmaTube's information architecture and visual language:
 - Left navigation drawer/sidebar with clear active state and compact/collapsed mode.
 - Main feed with responsive video grid; 16:9 thumbnails, duration/live indicator, title and channel metadata.
 - Search page with visible search field and optional filters.
-- Retain the latest Roxy on-screen TV keyboard; PlasmaTube's lack of an on-screen keyboard is not copied.
+- Use a CatTube-style on-screen keyboard layout, adapted for YouTube search rather than copying CatTube source code.
+- Keyboard uses a consistent 10-unit grid: number row, QWERTY row, home row, lower row, and one aligned special-key row with fixed key widths.
+- Alphabet page includes one-shot SHIFT, persistent CAPS LOCK, ?123 symbol-page toggle, space, backspace, and Done.
+- Symbol page uses the same 10-unit grid and includes ABC return, CAPS LOCK, space, backspace, and Done.
+- Keep a separate clear-text action above the grid without disturbing key alignment.
+- D-pad navigation moves by row and selects the nearest horizontal key centre on Up/Down, matching CatTube's remote behavior.
+- Focus styling must be high contrast and key dimensions must remain consistent at 720x576 PAL.
 - Keyboard includes alphabetic and symbol layouts, one-shot SHIFT, persistent CAPS LOCK, comma, period, number/symbol keys, space, backspace, clear, and Done/close controls.
 - Keyboard remains fully navigable by D-pad and visually indicates the focused key.
 - Feed, trending, subscriptions, history, playlists, and channel/detail destinations should use consistent page structure.
