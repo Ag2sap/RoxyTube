@@ -7,9 +7,8 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
 
-from PySide6.QtCore import Qt, QProcess, QUrl
+from PySide6.QtCore import Qt, QProcess, QUrl, QSize
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PySide6.QtWidgets import (
@@ -110,7 +109,7 @@ class MainWindow(QMainWindow):
         self.root_layout.addLayout(quality_row)
 
         self.list = QListWidget()
-        self.list.setIconSize(self.list.iconSize())
+        self.list.setIconSize(QSize(112, 64))
         self.list.itemActivated.connect(self.play_selected)
         self.root_layout.addWidget(self.list, 1)
 
