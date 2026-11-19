@@ -180,8 +180,39 @@ class MainWindow(QMainWindow):
 
         # Search/results page
         self.search_page = QWidget()
-        self.root_layout = QVBoxLayout(self.search_page)
+        search_shell = QHBoxLayout(self.search_page)
+        search_shell.setContentsMargins(0, 0, 0, 0)
+        search_shell.setSpacing(5)
+        self.sidebar = QFrame()
+        self.sidebar.setObjectName("sidebar")
+        self.sidebar.setFixedWidth(150)
+        self.sidebar.setStyleSheet("QFrame#sidebar{background:#171e28;border:1px solid #354253;border-radius:7px;}")
+        sidebar_layout = QVBoxLayout(self.sidebar)
+        sidebar_layout.setContentsMargins(4, 7, 4, 7)
+        sidebar_layout.setSpacing(5)
+        self.nav_buttons, self.nav_modes = [], []
+        for icon, label, mode in (
+            ("⌂", "Beranda", "home"), ("⌕", "Cari", "search"),
+            ("🔥", "Trending", "trending"), ("▣", "Video", "videos"),
+            ("◷", "Riwayat", "history"), ("♡", "Favorit", "favorites"),
+            ("☷", "Playlist", "playlists"), ("⚙", "Pengaturan", "settings"),
+        ):
+            button = QPushButton(f"{icon}  {label}")
+            button.setMinimumHeight(34)
+            button.setFocusPolicy(Qt.StrongFocus)
+            button.setStyleSheet("text-align:left;padding:5px 7px;font-size:12px;")
+            button.clicked.connect(lambda checked=False, m=mode: self.select_section(m))
+            sidebar_layout.addWidget(button)
+            self.nav_buttons.append(button)
+            self.nav_modes.append(mode)
+        sidebar_layout.addStretch(1)
+        search_shell.addWidget(self.sidebar)
+        content = QWidget()
+        self.root_layout = QVBoxLayout(content)
+        self.root_layout.setContentsMargins(3, 3, 3, 3)
         self.root_layout.setSpacing(6)
+        search_shell.addWidget(content, 1)
+        self.feed_mode = "home"
         header = QHBoxLayout()
         logo = QLabel("▶")
         logo.setStyleSheet("color:#ff0033;font-size:22px;font-weight:900;")
@@ -230,7 +261,8 @@ class MainWindow(QMainWindow):
         self.backspace_key.clicked.connect(self.backspace_query)
         keyboard_layout.addWidget(self.backspace_key, 4, 6, 1, 2)
         self.done_key = QPushButton("✓")
-        self.done_key.setToolTip("Tutup keyboard")        self.done_key.clicked.connect(self.toggle_keyboard)
+        self.done_key.setToolTip("Tutup keyboard")
+        self.done_key.clicked.connect(self.toggle_keyboard)
         keyboard_layout.addWidget(self.done_key, 4, 8, 1, 2)
         self.keyboard_widget.setVisible(False)
         self.root_layout.addWidget(self.keyboard_widget)
@@ -367,6 +399,8 @@ class MainWindow(QMainWindow):
         self.query.setFocus()
         QApplication.instance().installEventFilter(self)
         self.show_side_panel("playlist")
+        self.set_active_nav("home")
+        QTimer.singleShot(700, lambda: self.load_feed("home"))
 
     def apply_safe_area(self):
         m, w, h = self.safe_margins, max(1, self.width()), max(1, self.height())
@@ -414,7 +448,69 @@ class MainWindow(QMainWindow):
         self.thumbnail_cards.clear()
         self.thumbnail_queue.clear()
 
+    def set_active_nav(self, mode):
+        for button, button_mode in zip(self.nav_buttons, self.nav_modes):
+            active = button_mode == mode
+            button.setStyleSheet("text-align:left;padding:5px 7px;font-size:12px;" +
+                                 ("background:#40536b;border:2px solid #ffd166;" if active else ""))
+        self.feed_mode = mode
+
+    def collapse_sidebar(self):
+        self.sidebar.setFixedWidth(48)
+        for button, icon in zip(self.nav_buttons, ("⌂", "⌕", "🔥", "▣", "◷", "♡", "☷", "⚙")):
+            button.setText(icon)
+
+    def expand_sidebar(self):
+        self.sidebar.setFixedWidth(150)
+        for button, icon, label in zip(self.nav_buttons, ("⌂", "⌕", "🔥", "▣", "◷", "♡", "☷", "⚙"),
+                                       ("Beranda", "Cari", "Trending", "Video", "Riwayat", "Favorit", "Playlist", "Pengaturan")):
+            button.setText(f"{icon}  {label}")
+
+    def select_section(self, mode):
+        self.set_active_nav(mode)
+        self.collapse_sidebar()
+        if mode == "search":
+            self.query.setFocus()
+            self.status.setText("Masukkan kata pencarian atau URL YouTube.")
+        elif mode in ("home", "trending"):
+            self.load_feed(mode)
+        else:
+            self.results_heading.setText(mode.upper())
+            self.status.setText(f"Bagian {mode} belum tersedia.")
+
+    def load_feed(self, mode):
+        if mode not in ("home", "trending"):
+            return
+        if not shutil.which(YTDLP):
+            self.status.setText(f"yt-dlp tidak ditemukan: {YTDLP}")
+            return
+        if self.search_process and self.search_process.state() != QProcess.NotRunning:
+            self.search_process.kill()
+        self.set_active_nav(mode)
+        self.collapse_sidebar()
+        self.clear_cards()
+        self.results = []
+        self.current_page = 0
+        self.search_button.setEnabled(False)
+        if mode == "home":
+            target = "https://www.youtube.com/feed/recommended"
+            self.results_heading.setText("BERANDA  •  REKOMENDASI YOUTUBE")
+            self.status.setText("Memuat rekomendasi publik YouTube…")
+        else:
+            target = "https://www.youtube.com/feed/trending?gl=ID"
+            self.results_heading.setText("TRENDING 🔥  •  INDONESIA")
+            self.status.setText("Memuat video Trending Indonesia…")
+        process = QProcess(self)
+        self.search_process = process
+        process.setProgram(YTDLP)
+        process.setArguments(["--no-warnings", "--flat-playlist", "--dump-single-json", target])
+        process.finished.connect(lambda code, status, p=process: self.search_finished(p, code, status))
+        process.errorOccurred.connect(lambda _err, p=process: self.search_error(p))
+        process.start()
+
     def search(self):
+        self.set_active_nav("search")
+        self.collapse_sidebar()
         term = self.query.text().strip()
         if not term:
             self.status.setText("Masukkan kata pencarian atau URL.")
@@ -430,6 +526,7 @@ class MainWindow(QMainWindow):
         self.results = []
         self.current_page = 0
         self.status.setText("Mencari video YouTube…")
+        self.results_heading.setText("HASIL PENCARIAN")
         target = term if term.startswith(("http://", "https://")) else f"ytsearch60:{term}"
         process = QProcess(self)
         self.search_process = process
@@ -446,13 +543,20 @@ class MainWindow(QMainWindow):
 
     def search_finished(self, process, exit_code, _exit_status):
         raw = bytes(process.readAllStandardOutput()).decode("utf-8", "replace")
-        err = bytes(process.readAllStandardError()).decode("utf-8", "replace")        if process is not self.search_process:
+        err = bytes(process.readAllStandardError()).decode("utf-8", "replace")
+        if process is not self.search_process:
             return
         self.search_button.setEnabled(True)
         if exit_code != 0 or not raw.strip():
-            self.status.setText("Pencarian gagal. Periksa koneksi / yt-dlp.")
-            if err.strip():
-                QMessageBox.warning(self, APP_NAME, err[-1200:])
+            if self.feed_mode == "home":
+                self.status.setText("Rekomendasi publik tidak dapat dimuat. Periksa koneksi atau dukungan yt-dlp.")
+            elif self.feed_mode == "trending":
+                self.status.setText("Trending YouTube Indonesia tidak tersedia dari sumber publik saat ini.")
+            else:
+                self.status.setText("Pencarian gagal. Periksa koneksi / yt-dlp.")
+                if err.strip():
+                    QMessageBox.warning(self, APP_NAME, err[-1200:])
+            self.search_button.setEnabled(True)
             return
         try:
             data = json.loads(raw)
@@ -470,8 +574,23 @@ class MainWindow(QMainWindow):
                     "thumbnail": thumbnail_url(entry), "duration": duration_text,
                     "description": entry.get("description") or "",
                 })
+            if not self.results:
+                if self.feed_mode == "home":
+                    self.status.setText("Belum ada rekomendasi publik yang dapat ditampilkan.")
+                elif self.feed_mode == "trending":
+                    self.status.setText("Daftar Trending Indonesia kosong atau tidak didukung YouTube.")
+                else:
+                    self.status.setText("Tidak ada video yang ditemukan.")
+                return
             self.render_page()
-            self.status.setText(f"{len(self.results)} video ditemukan.")
+            if self.feed_mode == "home":
+                self.results_heading.setText("BERANDA  •  REKOMENDASI YOUTUBE")
+                self.status.setText(f"{len(self.results)} rekomendasi publik.")
+            elif self.feed_mode == "trending":
+                self.results_heading.setText("TRENDING 🔥  •  INDONESIA")
+                self.status.setText(f"{len(self.results)} video Trending.")
+            else:
+                self.status.setText(f"{len(self.results)} video ditemukan.")
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             self.status.setText(f"Format hasil tidak dikenali: {exc}")
 
@@ -857,9 +976,28 @@ class MainWindow(QMainWindow):
                         self.keyboard_widget.setVisible(False)
                     self.query.setFocus()
                     return True
+                if focus in self.nav_buttons:
+                    nav_index = self.nav_buttons.index(focus)
+                    if key == Qt.Key_Down and nav_index + 1 < len(self.nav_buttons):
+                        self.nav_buttons[nav_index + 1].setFocus(); return True
+                    if key == Qt.Key_Up and nav_index > 0:
+                        self.nav_buttons[nav_index - 1].setFocus(); return True
+                    if key == Qt.Key_Right:
+                        if self.feed_mode == "search":
+                            self.query.setFocus()
+                        elif self.cards:
+                            self.cards[0].setFocus()
+                        return True
+                    if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
+                        self.select_section(self.nav_modes[nav_index]); return True
                 if focus in self.cards:
                     idx = self.cards.index(focus)
                     cols = 2
+                    if key == Qt.Key_Left and idx % cols == 0:
+                        self.expand_sidebar()
+                        active = self.nav_modes.index(self.feed_mode) if self.feed_mode in self.nav_modes else 0
+                        self.nav_buttons[active].setFocus()
+                        return True
                     if key == Qt.Key_Right and idx + 1 < len(self.cards):
                         self.cards[idx+1].setFocus(); return True
                     if key == Qt.Key_Left and idx % cols:
@@ -872,6 +1010,10 @@ class MainWindow(QMainWindow):
                         self.query.setFocus(); return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                         self.play_index(idx); return True
+                if focus is self.query and key == Qt.Key_Left:
+                    self.expand_sidebar()
+                    self.nav_buttons[1].setFocus()
+                    return True
                 if focus is self.query and key == Qt.Key_Down:
                     if self.keyboard_widget.isVisible() and self.keyboard_keys:
                         self.keyboard_keys[0].setFocus()
