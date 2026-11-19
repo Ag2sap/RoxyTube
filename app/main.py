@@ -1504,7 +1504,7 @@ def main():
     probe = QLocalSocket()
     probe.connectToServer(server_name)
     if probe.waitForConnected(500):
-        probe.write(b"activate\\n")
+        probe.write(b"activate")
         probe.waitForBytesWritten(500)
         probe.disconnectFromServer()
         return 0
