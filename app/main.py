@@ -541,6 +541,8 @@ class MainWindow(QMainWindow):
         args = ["--no-osc", "--force-window=yes", f"--wid={int(self.video_surface.winId())}",
                 f"--input-ipc-server={self.ipc_path}",
                 f"--ytdl-format={QUALITY_FORMATS[self.quality.currentText()]}",
+                # Avoid MPV's yt-dlp hook fetching every subtitle track before first frame.
+                "--ytdl-raw-options=sub-langs=none,no-check-formats=",
                 "--keep-open=no", video["url"]]
         process.setProgram(MPV)
         process.setArguments(args)
