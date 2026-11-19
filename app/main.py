@@ -116,10 +116,14 @@ class MainWindow(QMainWindow):
         bottom = QHBoxLayout()
         self.play_button = QPushButton("PUTAR")
         self.play_button.clicked.connect(self.play_selected)
+        self.stop_button = QPushButton("STOP")
+        self.stop_button.setEnabled(False)
+        self.stop_button.clicked.connect(self.stop_player)
         self.status = QLabel("Siap. Masukkan pencarian atau URL video.")
         self.status.setObjectName("hint")
         self.status.setWordWrap(True)
         bottom.addWidget(self.play_button)
+        bottom.addWidget(self.stop_button)
         bottom.addWidget(self.status, 1)
         self.root_layout.addLayout(bottom)
 
@@ -239,9 +243,39 @@ class MainWindow(QMainWindow):
         self.player_process = process
         process.setProgram(MPV)
         process.setArguments(["--force-window=yes", f"--ytdl-format={fmt}", video["url"]])
-        process.errorOccurred.connect(lambda _err: self.status.setText("MPV gagal dijalankan."))
+        process.started.connect(lambda p=process: self.player_started(p, video["title"]))
+        process.finished.connect(lambda code, _status, p=process: self.player_finished(p, code))
+        process.errorOccurred.connect(lambda _err, p=process: self.player_error(p))
         process.start()
-        self.status.setText(f"Membuka: {video['title']}")
+        self.status.setText(f"Menyiapkan: {video['title']}")
+
+    def player_started(self, process, title):
+        if process is self.player_process:
+            self.stop_button.setEnabled(True)
+            self.status.setText(f"Sedang diputar: {title} • Tutup jendela MPV atau tekan STOP untuk kembali.")
+
+    def player_finished(self, process, exit_code):
+        if process is self.player_process:
+            self.stop_button.setEnabled(False)
+            self.status.setText("Pemutaran selesai. Daftar video siap.")
+        process.deleteLater()
+
+    def player_error(self, process):
+        if process is self.player_process:
+            self.stop_button.setEnabled(False)
+            self.status.setText("MPV tidak dapat dijalankan. Periksa instalasi MPV.")
+
+    def stop_player(self):
+        if self.player_process and self.player_process.state() != QProcess.NotRunning:
+            self.status.setText("Menghentikan pemutaran…")
+            self.player_process.terminate()
+            self.stop_button.setEnabled(False)
+
+    def closeEvent(self, event):
+        for process in (self.search_process, self.player_process):
+            if process and process.state() != QProcess.NotRunning:
+                process.terminate()
+        super().closeEvent(event)
 
     def keyPressEvent(self, event):
         key = event.key()
