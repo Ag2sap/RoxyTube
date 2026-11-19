@@ -1986,7 +1986,10 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key_Escape, Qt.Key_Back) and self.pages.currentWidget() == self.player_page:
-            self.back_to_results()
+            if self.is_playback_fullscreen:
+                self.exit_playback_fullscreen()
+            else:
+                self.back_to_results()
             return
         if event.key() in (Qt.Key_Escape, Qt.Key_Back) and self.keyboard_open:
             self.set_keyboard_visible(False)
