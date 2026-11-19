@@ -7,6 +7,8 @@ A lightweight YouTube TV-style frontend for HG680P / Armbian Noble (ARM64).
 ## MVP features
 
 - TV-oriented dark interface with keyboard / D-pad navigation.
+- In-app MINIMIZE action to hide the window without closing the app.
+- Built-in on-screen keyboard for remote-based text entry (letters, numbers, space, backspace, clear).
 - Search public YouTube videos using `yt-dlp`.
 - Display title, channel, duration and asynchronously loaded thumbnails when provided by yt-dlp.
 - Play selected video using the system `mpv` executable.
