@@ -1108,9 +1108,13 @@ class MainWindow(QMainWindow):
         if self.metadata_requested_index == index:
             return
         self.metadata_requested_index = index
-        QTimer.singleShot(delay_ms, lambda i=index, p=process:
-            self.fetch_metadata(i) if (                p is self.player_process and i == self.current_index and
-                self.process_is_running(p) else None)
+        QTimer.singleShot(
+            delay_ms,
+            lambda i=index, p=process:
+                self.fetch_metadata(i)
+                if p is self.player_process and i == self.current_index and self.process_is_running(p)
+                else None,
+        )
 
     def retry_lower_quality(self, process, reason):
         if (process is not self.player_process or self.playback_started or
@@ -1122,7 +1126,10 @@ class MainWindow(QMainWindow):
         self.quality.setCurrentText(next_quality)
         self.quality.blockSignals(False)
         self.player_status.setText(f"{reason} Mencoba {next_quality}…")
-        process.deleteLater()
+        try:
+            process.deleteLater()
+        except RuntimeError:
+            pass
         QTimer.singleShot(450, self._launch_player)
         return True
 
@@ -1148,6 +1155,10 @@ class MainWindow(QMainWindow):
             self.player_process = None
             self.set_playback_controls_enabled(False)
             self.player_status.setText("MPV gagal dijalankan.")
+        try:
+            process.deleteLater()
+        except RuntimeError:
+            pass
 
     def fetch_metadata(self, index):
         if self.process_is_running(self.metadata_process):
