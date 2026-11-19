@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/tv-ui-single-layer
+      - feature/plasmatube-style-ui
   pull_request:
     branches:
       - main
