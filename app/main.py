@@ -63,6 +63,8 @@ class CircularProgress(QWidget):
         super().__init__(parent)
         self._value = 0
         self.setFixedSize(18, 18)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setStyleSheet("background:transparent;border:0;")
         self.setToolTip("Progress playback")
 
     def setValue(self, value):
