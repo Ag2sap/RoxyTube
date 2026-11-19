@@ -169,12 +169,45 @@ class MainWindow(QMainWindow):
         self.query = QLineEdit()
         self.query.setPlaceholderText("Cari video atau tempel URL YouTube…")
         self.query.returnPressed.connect(self.search)
+        self.keyboard_button = QPushButton("⌨")
+        self.keyboard_button.setToolTip("Buka keyboard layar")
+        self.keyboard_button.clicked.connect(self.toggle_keyboard)
         self.search_button = QPushButton("⌕")
         self.search_button.setToolTip("Cari video")
         self.search_button.clicked.connect(self.search)
         search_row.addWidget(self.query, 1)
+        search_row.addWidget(self.keyboard_button)
         search_row.addWidget(self.search_button)
         self.root_layout.addLayout(search_row)
+
+        self.keyboard_widget = QFrame()
+        self.keyboard_widget.setStyleSheet("QFrame{background:#171e28;border:1px solid #354253;border-radius:7px;}")
+        keyboard_layout = QGridLayout(self.keyboard_widget)
+        keyboard_layout.setContentsMargins(5, 5, 5, 5)
+        keyboard_layout.setSpacing(3)
+        self.keyboard_keys = []
+        for row_index, chars in enumerate(("1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM")):
+            offset = 1 if row_index == 2 else (2 if row_index == 3 else 0)
+            for col_index, char in enumerate(chars):
+                key_button = QPushButton(char)
+                key_button.setFocusPolicy(Qt.StrongFocus)
+                key_button.setMaximumHeight(29)
+                key_button.clicked.connect(lambda checked=False, value=char: self.insert_key(value))
+                keyboard_layout.addWidget(key_button, row_index, col_index + offset)
+                self.keyboard_keys.append(key_button)
+        self.space_key = QPushButton("SPASI")
+        self.space_key.clicked.connect(lambda: self.insert_key(" "))
+        keyboard_layout.addWidget(self.space_key, 4, 2, 1, 4)
+        self.backspace_key = QPushButton("⌫")
+        self.backspace_key.setToolTip("Hapus satu karakter")
+        self.backspace_key.clicked.connect(self.backspace_query)
+        keyboard_layout.addWidget(self.backspace_key, 4, 6, 1, 2)
+        self.done_key = QPushButton("✓")
+        self.done_key.setToolTip("Tutup keyboard")
+        self.done_key.clicked.connect(self.toggle_keyboard)
+        keyboard_layout.addWidget(self.done_key, 4, 8, 1, 2)
+        self.keyboard_widget.setVisible(False)
+        self.root_layout.addWidget(self.keyboard_widget)
 
         options = QHBoxLayout()
         options.addWidget(QLabel("Video per halaman"))
@@ -320,6 +353,25 @@ class MainWindow(QMainWindow):
         for i, card in enumerate(self.cards):
             self.cards_grid.removeWidget(card)
             self.cards_grid.addWidget(card, i // columns, i % columns)
+
+    def toggle_keyboard(self):
+        visible = not self.keyboard_widget.isVisible()
+        self.keyboard_widget.setVisible(visible)
+        if visible and self.keyboard_keys:
+            self.keyboard_keys[0].setFocus()
+        else:
+            self.query.setFocus()
+
+    def insert_key(self, value):
+        pos = self.query.cursorPosition()
+        self.query.setText(self.query.text()[:pos] + value + self.query.text()[pos:])
+        self.query.setCursorPosition(pos + len(value))
+
+    def backspace_query(self):
+        pos = self.query.cursorPosition()
+        if pos:
+            self.query.setText(self.query.text()[:pos - 1] + self.query.text()[pos:])
+            self.query.setCursorPosition(pos - 1)
 
     def clear_cards(self):
         for card in self.cards:
@@ -636,6 +688,8 @@ class MainWindow(QMainWindow):
                     return True
             elif self.pages.currentWidget() == self.search_page:
                 if key in (Qt.Key_Escape, Qt.Key_Back):
+                    if self.keyboard_widget.isVisible():
+                        self.keyboard_widget.setVisible(False)
                     self.query.setFocus()
                     return True
                 if focus in self.cards:
@@ -654,6 +708,9 @@ class MainWindow(QMainWindow):
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                         self.play_index(idx); return True
                 if focus is self.query and key == Qt.Key_Down:
+                    if self.keyboard_widget.isVisible() and self.keyboard_keys:
+                        self.keyboard_keys[0].setFocus()
+                        return True
                     if self.cards:
                         self.cards[0].setFocus()
                         return True
@@ -662,6 +719,10 @@ class MainWindow(QMainWindow):
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key_Escape, Qt.Key_Back) and self.pages.currentWidget() == self.player_page:
             self.back_to_results()
+            return
+        if event.key() in (Qt.Key_Escape, Qt.Key_Back) and self.keyboard_widget.isVisible():
+            self.keyboard_widget.setVisible(False)
+            self.query.setFocus()
             return
         super().keyPressEvent(event)
 
