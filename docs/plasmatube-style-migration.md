@@ -24,6 +24,9 @@ Follow PlasmaTube's information architecture and visual language:
 - Left navigation drawer/sidebar with clear active state and compact/collapsed mode.
 - Main feed with responsive video grid; 16:9 thumbnails, duration/live indicator, title and channel metadata.
 - Search page with visible search field and optional filters.
+- Retain the latest Roxy on-screen TV keyboard; PlasmaTube's lack of an on-screen keyboard is not copied.
+- Keyboard includes alphabetic and symbol layouts, one-shot SHIFT, persistent CAPS LOCK, comma, period, number/symbol keys, space, backspace, clear, and Done/close controls.
+- Keyboard remains fully navigable by D-pad and visually indicates the focused key.
 - Feed, trending, subscriptions, history, playlists, and channel/detail destinations should use consistent page structure.
 - Video details and playback should feel like one application flow, not a detached popup.
 - Player view should keep the video prominent, with title/channel, queue/related items, description, subtitle and quality actions.
