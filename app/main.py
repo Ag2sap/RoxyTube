@@ -1264,6 +1264,9 @@ class MainWindow(QMainWindow):
                     self.playback_started = True
                     self.update_timeline(self.current_time_pos, self.duration_seconds)
                     self.schedule_metadata_after_start(index, process, 1200)
+                    if (self.selected_subtitle_track and
+                            self.subtitle_applied_process is not process):
+                        QTimer.singleShot(300, self.apply_selected_subtitle)
                 elif name == "duration" and isinstance(value, (int, float)):
                     self.duration_seconds = max(0.0, float(value))
                     self.update_timeline(self.current_time_pos, self.duration_seconds)
