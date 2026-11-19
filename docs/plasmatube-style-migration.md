@@ -35,7 +35,9 @@ Follow PlasmaTube's information architecture and visual language:
 - Keyboard remains fully navigable by D-pad and visually indicates the focused key.
 - Feed, trending, subscriptions, history, playlists, and channel/detail destinations should use consistent page structure.
 - Video details and playback should feel like one application flow, not a detached popup.
-- The watch page uses a vertical 4:3 layout: embedded video first, channel metadata, playback controls and quality/subtitle actions, then a compact queue/description panel.
+- The watch page uses a vertical 4:3 layout: embedded video first, channel metadata, a seek timeline with elapsed/total time, remote-operable volume slider, play/pause and previous/next controls, quality/subtitle actions, then a compact queue/description panel. Controls communicate with MPV over its IPC socket; video remains embedded in the same application page.
+- The on-screen keyboard retains its bottom-up slide animation and CatTube-style 10-unit key grid.
+- Recommended/Home uses one large full-width video tile per row; search results remain a two-column grid.
 - Player view should keep the video prominent, with title/channel, queue/related items, description, subtitle and quality actions.
 - Remote-first focus treatment and deterministic D-pad behavior. Back/Escape returns through the page stack; OK activates the focused control.
 - Fit 4:3 PAL safe area. Do not assume a widescreen desktop layout.
