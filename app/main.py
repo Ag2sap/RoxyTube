@@ -937,7 +937,7 @@ class MainWindow(QMainWindow):
         if self.keyboard_open and self.keyboard.buttons:
             self.keyboard.buttons[0].setFocus()
         else:
-            self.query.setFocus()
+            self.keyboard_button.setFocus()
 
     def clear_cards(self):
         for card in self.cards:
@@ -1253,6 +1253,7 @@ class MainWindow(QMainWindow):
 
     def _launch_player(self):
         if not shutil.which(MPV):
+            self.loading_bar.hide()
             QMessageBox.critical(self, APP_NAME, f"mpv tidak ditemukan: {MPV}")
             self.back_to_results()
             return
@@ -1598,8 +1599,8 @@ class MainWindow(QMainWindow):
         position = max(0.0, float(position or 0))
         self.elapsed_label.setText(self.format_time(position))
         self.duration_label.setText(self.format_time(duration))
-        self.mini_progress.setValue(
-            int(min(1.0, position / duration) * 1000) if duration > 0 else 0
+        self.mini_time_label.setText(
+            f"{self.format_time(position)}/{self.format_time(duration)}"
         )
         if not self.slider_dragging:
             self.seek_slider.blockSignals(True)
@@ -1801,7 +1802,7 @@ class MainWindow(QMainWindow):
         if self.cards:
             self.cards[0].setFocus()
         else:
-            self.query.setFocus()
+            self.keyboard_button.setFocus()
 
     def back_to_results(self):
         self.background_playback = self.process_is_running(self.player_process)
@@ -1815,7 +1816,7 @@ class MainWindow(QMainWindow):
         if self.cards:
             self.cards[0].setFocus()
         else:
-            self.query.setFocus()
+            self.keyboard_button.setFocus()
 
     def toggle_playback_fullscreen(self):
         if self.is_playback_fullscreen:
@@ -2218,7 +2219,8 @@ class MainWindow(QMainWindow):
                     self.keyboard_button.setFocus(); return True
                 if focus is self.keyboard_button:
                     if key == Qt.Key_Left:
-                        self.query.setFocus(); return True
+                        self.expand_sidebar()
+                        self.nav_buttons[1].setFocus(); return True
                     if key == Qt.Key_Right:
                         self.search_button.setFocus(); return True
                     if key == Qt.Key_Down:
