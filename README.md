@@ -6,7 +6,7 @@ A lightweight YouTube TV-style frontend for HG680P / Armbian Noble (ARM64).
 
 ## MVP features
 
-- TV-oriented dark interface with keyboard / D-pad navigation.
+- TV-oriented dark interface sized around a 4:3 window, with responsive Safe Area margins, wrapped result titles, and centralized D-pad focus navigation.
 - In-app MINIMIZE action to hide the window without closing the app.
 - Built-in on-screen keyboard for remote-based text entry (letters, numbers, space, backspace, clear, cancel, and finish). The virtual BATAL action closes without applying edits; SELESAI applies the typed text.
 - Search public YouTube videos using `yt-dlp`.
