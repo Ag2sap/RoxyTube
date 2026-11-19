@@ -2012,6 +2012,9 @@ class MainWindow(QMainWindow):
         for process in (self.search_process, self.player_process, self.metadata_process):
             if self.process_is_running(process):
                 process.terminate()
+                if not process.waitForFinished(500):
+                    process.kill()
+                    process.waitForFinished(500)
         try:
             Path(self.ipc_path).unlink(missing_ok=True)
         except OSError:
