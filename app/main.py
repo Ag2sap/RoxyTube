@@ -535,7 +535,7 @@ class MainWindow(QMainWindow):
         header.addWidget(brand)
 
         self.mini_player = QFrame()
-        self.mini_player.setFixedWidth(224)
+        self.mini_player.setFixedWidth(216)
         self.mini_player.setStyleSheet(
             "QFrame{background:#171e28;border:1px solid #65758b;border-radius:6px;}"
         )
@@ -587,8 +587,8 @@ class MainWindow(QMainWindow):
             mini_controls.addWidget(widget)
         self.mini_time_label = QLabel("0:00/0:00")
         self.mini_time_label.setObjectName("hint")
-        self.mini_time_label.setMinimumWidth(72)
-        self.mini_time_label.setMaximumWidth(86)
+        self.mini_time_label.setMinimumWidth(64)
+        self.mini_time_label.setMaximumWidth(78)
         self.mini_time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         mini_controls.addWidget(self.mini_time_label)
         mini_layout.addLayout(mini_controls)
@@ -2069,10 +2069,14 @@ class MainWindow(QMainWindow):
                            self.next_video_button, self.stop_button,
                            self.fullscreen_button, self.volume_slider]
                     pos = row.index(focus)
-                    if key == Qt.Key_Left and pos > 0:
-                        row[pos - 1].setFocus(); return True
-                    if key == Qt.Key_Right and pos < len(row) - 1:
-                        row[pos + 1].setFocus(); return True
+                    if key == Qt.Key_Left:
+                        if pos > 0:
+                            row[pos - 1].setFocus()
+                        return True
+                    if key == Qt.Key_Right:
+                        if pos < len(row) - 1:
+                            row[pos + 1].setFocus()
+                        return True
                     if key == Qt.Key_Up:
                         self.seek_slider.setFocus(); return True
                     if key == Qt.Key_Down:
@@ -2168,6 +2172,8 @@ class MainWindow(QMainWindow):
                     return True
                 if focus is self.settings_back_button and key == Qt.Key_Down:
                     self.page_size_box.setFocus(); return True
+                if focus is self.settings_back_button and key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up):
+                    return True
                 if focus is self.settings_back_button and key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                     self.return_from_settings(); return True
             elif self.pages.currentWidget() == self.search_page:
@@ -2178,7 +2184,7 @@ class MainWindow(QMainWindow):
                         self.mini_rewind_button.setFocus(); return True
                     if key == Qt.Key_Right:
                         self.minimize_button.setFocus(); return True
-                    if key == Qt.Key_Up:
+                    if key in (Qt.Key_Left, Qt.Key_Up):
                         return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                         self.return_to_playback(); return True
@@ -2253,8 +2259,10 @@ class MainWindow(QMainWindow):
                         active = self.nav_modes.index(self.feed_mode) if self.feed_mode in self.nav_modes else 0
                         self.nav_buttons[active].setFocus()
                         return True
-                    if key == Qt.Key_Right and idx % cols == 0 and idx + 1 < len(self.cards):
-                        self.cards[idx + 1].setFocus(); return True
+                    if key == Qt.Key_Right:
+                        if idx % cols == 0 and idx + 1 < len(self.cards):
+                            self.cards[idx + 1].setFocus()
+                        return True
                     if key == Qt.Key_Left and idx % cols:
                         self.cards[idx - 1].setFocus(); return True
                     if key == Qt.Key_Down and idx + cols < len(self.cards):
@@ -2299,6 +2307,9 @@ class MainWindow(QMainWindow):
                         self.nav_buttons[1].setFocus(); return True
                     if key == Qt.Key_Right:
                         self.query.setFocus(); return True
+                    if key == Qt.Key_Up:
+                        (self.mini_title_button if self.mini_player.isVisible()
+                         else self.minimize_button).setFocus(); return True
                     if key == Qt.Key_Down:
                         if self.keyboard_open and self.keyboard.buttons:
                             self.keyboard.buttons[0].setFocus()
@@ -2312,6 +2323,9 @@ class MainWindow(QMainWindow):
                         self.query.setFocus(); return True
                     if key == Qt.Key_Right:
                         return True
+                    if key == Qt.Key_Up:
+                        (self.mini_title_button if self.mini_player.isVisible()
+                         else self.minimize_button).setFocus(); return True
                     if key == Qt.Key_Down and self.cards:
                         self.cards[0].setFocus(); return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
