@@ -552,9 +552,6 @@ class MainWindow(QMainWindow):
         self.side_text_layout.setSpacing(2)
         self.side_content.setWidget(self.side_text_host)
         side_layout.addWidget(self.side_content, 1)
-        body.addWidget(self.side_panel, 2)
-        player_layout.addLayout(body, 1)
-
         timeline = QHBoxLayout()
         timeline.setSpacing(5)
         self.elapsed_label = QLabel("0:00")
@@ -583,16 +580,22 @@ class MainWindow(QMainWindow):
         timeline.addWidget(self.elapsed_label)
         timeline.addWidget(self.seek_slider, 1)
         timeline.addWidget(self.duration_label)
-        player_layout.addLayout(timeline)
+        body.addLayout(timeline)
 
         controls = QHBoxLayout()
         self.previous_video_button = QPushButton("⏮")
         self.previous_video_button.setToolTip("Video sebelumnya")
         self.previous_video_button.clicked.connect(lambda: self.play_index(self.current_index - 1))
+        self.rewind_button = QPushButton("−10s")
+        self.rewind_button.setToolTip("Mundur 10 detik")
+        self.rewind_button.clicked.connect(lambda: self.seek_relative(-10))
         self.play_pause_button = QPushButton("Ⅱ")
         self.play_pause_button.setToolTip("Jeda / lanjut")
         self.play_pause_button.clicked.connect(self.toggle_play_pause)
         self.play_pause_button.setFocusPolicy(Qt.StrongFocus)
+        self.fast_forward_button = QPushButton("+10s")
+        self.fast_forward_button.setToolTip("Maju 10 detik")
+        self.fast_forward_button.clicked.connect(lambda: self.seek_relative(10))
         self.next_video_button = QPushButton("⏭")
         self.next_video_button.setToolTip("Video berikutnya")
         self.next_video_button.clicked.connect(lambda: self.play_index(self.current_index + 1))
@@ -609,7 +612,9 @@ class MainWindow(QMainWindow):
         self.quality.setMinimumWidth(75)
         self.quality.currentTextChanged.connect(self.change_quality)
         controls.addWidget(self.previous_video_button)
+        controls.addWidget(self.rewind_button)
         controls.addWidget(self.play_pause_button)
+        controls.addWidget(self.fast_forward_button)
         controls.addWidget(self.next_video_button)
         controls.addWidget(self.stop_button)
         self.volume_slider = QSlider(Qt.Horizontal)
@@ -626,7 +631,9 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.quality)
         controls.addWidget(QLabel("CC"))
         controls.addWidget(self.subtitle_box)
-        player_layout.addLayout(controls)
+        body.addLayout(controls)
+        body.addWidget(self.side_panel, 2)
+        player_layout.addLayout(body, 1)
         self.player_status = QLabel("Menyiapkan pemutar…")
         self.player_status.setObjectName("hint")
         player_layout.addWidget(self.player_status)
@@ -1254,6 +1261,18 @@ class MainWindow(QMainWindow):
             self.mpv_command(["seek", value, "absolute+exact"])
             self.update_timeline(self.current_time_pos, self.duration_seconds)
 
+    def seek_relative(self, seconds):
+        """Seek the active MPV session by a fixed relative offset."""
+        if not self.process_is_running(self.player_process):
+            return
+        if not self.mpv_command(["seek", int(seconds), "relative+exact"]):
+            return
+        target = max(0.0, self.current_time_pos + float(seconds))
+        if self.duration_seconds > 0:
+            target = min(target, self.duration_seconds)
+        self.current_time_pos = target
+        self.update_timeline(target, self.duration_seconds)
+
     def toggle_play_pause(self):
         if not self.process_is_running(self.player_process):
             return
@@ -1262,8 +1281,8 @@ class MainWindow(QMainWindow):
         self.play_pause_button.setText("▶" if self.playback_paused else "Ⅱ")
 
     def set_playback_controls_enabled(self, enabled):
-        for widget in (self.play_pause_button, self.seek_slider, self.volume_slider,
-                       self.quality, self.subtitle_box):
+        for widget in (self.rewind_button, self.play_pause_button, self.fast_forward_button,
+                       self.seek_slider, self.volume_slider, self.quality, self.subtitle_box):
             widget.setEnabled(bool(enabled))
         self.previous_video_button.setEnabled(bool(enabled) and self.current_index > 0)
         self.next_video_button.setEnabled(bool(enabled) and self.current_index + 1 < len(self.results))
@@ -1388,12 +1407,17 @@ class MainWindow(QMainWindow):
                     if key == Qt.Key_Down:
                         (self.quality if focus is self.volume_slider else self.previous_video_button).setFocus()
                         return True
-                    if key == Qt.Key_Up and focus is self.volume_slider:
-                        self.seek_slider.setFocus()
+                    if key == Qt.Key_Up:
+                        if focus is self.volume_slider:
+                            self.seek_slider.setFocus()
+                        else:
+                            self.back_button.setFocus()
                         return True
-                if focus in (self.previous_video_button, self.play_pause_button,
+                if focus in (self.previous_video_button, self.rewind_button,
+                             self.play_pause_button, self.fast_forward_button,
                              self.next_video_button, self.stop_button):
-                    row = [self.previous_video_button, self.play_pause_button,
+                    row = [self.previous_video_button, self.rewind_button,
+                           self.play_pause_button, self.fast_forward_button,
                            self.next_video_button, self.stop_button, self.volume_slider]
                     pos = row.index(focus)
                     if key == Qt.Key_Left and pos > 0:
@@ -1402,6 +1426,8 @@ class MainWindow(QMainWindow):
                         row[pos + 1].setFocus(); return True
                     if key == Qt.Key_Up:
                         self.seek_slider.setFocus(); return True
+                    if key == Qt.Key_Down:
+                        self.playlist_button.setFocus(); return True
                 if focus is self.quality:
                     if key == Qt.Key_Left:
                         self.stop_button.setFocus(); return True
@@ -1409,11 +1435,24 @@ class MainWindow(QMainWindow):
                         self.subtitle_box.setFocus(); return True
                     if key == Qt.Key_Up:
                         self.seek_slider.setFocus(); return True
+                    if key == Qt.Key_Down:
+                        self.playlist_button.setFocus(); return True
                 if focus is self.subtitle_box:
                     if key == Qt.Key_Left:
                         self.quality.setFocus(); return True
                     if key == Qt.Key_Up:
                         self.seek_slider.setFocus(); return True
+                    if key == Qt.Key_Down:
+                        self.playlist_button.setFocus(); return True
+                if focus in (self.playlist_button, self.description_button):
+                    if key == Qt.Key_Left:
+                        self.playlist_button.setFocus(); return True
+                    if key == Qt.Key_Right:
+                        self.description_button.setFocus(); return True
+                    if key == Qt.Key_Up:
+                        self.subtitle_box.setFocus(); return True
+                    if key == Qt.Key_Down:
+                        self.side_content.setFocus(); return True
                 if key == Qt.Key_Left and focus is self.subtitle_box:
                     self.quality.setFocus()
                     return True
