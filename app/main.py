@@ -594,7 +594,6 @@ class MainWindow(QMainWindow):
         mini_layout.addLayout(mini_controls)
         header.addStretch(1)
         header.addWidget(self.mini_player, 0, Qt.AlignRight)
-        header.addSpacing(62)
         self.mini_player.hide()
 
         # Pin controls to the actual Home window corner, independent of sidebar width.
@@ -623,7 +622,7 @@ class MainWindow(QMainWindow):
             )
         window_controls.addWidget(self.minimize_button)
         window_controls.addWidget(self.close_button)
-        self.position_window_controls()
+        header.addWidget(self.window_controls_widget, 0, Qt.AlignRight)
         self.root_layout.addLayout(header)
 
         search_row = QHBoxLayout()
@@ -931,7 +930,6 @@ class MainWindow(QMainWindow):
         self.set_playback_controls_enabled(False)
 
         self.apply_safe_area()
-        self.position_window_controls()
         self.nav_buttons[0].setFocus()
         QApplication.instance().installEventFilter(self)
         self.show_side_panel("playlist")
@@ -948,7 +946,6 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         self.apply_safe_area()
         self.refresh_card_columns()
-        self.position_window_controls()
         if self.mini_player.isVisible():
             QTimer.singleShot(0, self.advance_mini_title)
 
