@@ -72,24 +72,45 @@ class VideoCard(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(7, 7, 7, 7)
         layout.setSpacing(4)
+
+        # Large 16:9 thumbnail with duration overlaid in its bottom-right corner.
+        self.thumbnail_frame = QFrame()
+        self.thumbnail_frame.setObjectName("thumbnailFrame")
+        self.thumbnail_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.thumbnail_frame.setStyleSheet(
+            "QFrame#thumbnailFrame { background:#252e3b; border:0; border-radius:5px; }")
+        thumb_layout = QGridLayout(self.thumbnail_frame)
+        thumb_layout.setContentsMargins(0, 0, 5, 5)
         self.image = QLabel(" ")
         self.image.setAlignment(Qt.AlignCenter)
         self.image.setMinimumHeight(70)
         self.image.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.image.setStyleSheet("background:#252e3b;color:#9ba8b8;border:0;font-size:11px;")
-        layout.addWidget(self.image, 1)
+        self.image.setStyleSheet("background:transparent;color:#9ba8b8;border:0;font-size:11px;")
+        thumb_layout.addWidget(self.image, 0, 0)
+        self.duration_label = QLabel(duration or "")
+        self.duration_label.setAlignment(Qt.AlignCenter)
+        self.duration_label.setStyleSheet(
+            "QLabel { background:rgba(0,0,0,220); color:white; border-radius:3px;"
+            " padding:2px 5px; font-size:10px; font-weight:700; }")
+        self.duration_label.setVisible(bool(duration))
+        thumb_layout.addWidget(self.duration_label, 0, 0, Qt.AlignRight | Qt.AlignBottom)
+        layout.addWidget(self.thumbnail_frame)
+
         self.title_label = QLabel(title)
         self.title_label.setWordWrap(True)
         self.title_label.setMaximumHeight(38)
         self.title_label.setStyleSheet("font-size:13px;font-weight:700;color:#f4f6f8;border:0;")
         layout.addWidget(self.title_label)
-        self.meta_label = QLabel(f"{channel}  •  {duration}" if duration else channel)
+        self.meta_label = QLabel(channel)
+        self.meta_label.setWordWrap(False)
         self.meta_label.setStyleSheet("font-size:10px;color:#aeb8c5;border:0;")
         layout.addWidget(self.meta_label)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.image.setFixedHeight(max(70, int((self.width() - 20) * 9 / 16)))
+        height = max(70, int((self.width() - 20) * 9 / 16))
+        self.thumbnail_frame.setFixedHeight(height)
+        self.image.setFixedHeight(height)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and callable(self.on_activate):
@@ -361,7 +382,7 @@ class MainWindow(QMainWindow):
     def refresh_card_columns(self):
         if not hasattr(self, "scroll"):
             return
-        columns = 2 if self.scroll.viewport().width() < 980 else 3
+        columns = 2
         for i, card in enumerate(self.cards):
             self.cards_grid.removeWidget(card)
             self.cards_grid.addWidget(card, i // columns, i % columns)
@@ -464,7 +485,7 @@ class MainWindow(QMainWindow):
         for idx in range(start, end):
             result = self.results[idx]
             card = VideoCard(idx, result["title"], result["channel"], result["duration"], self.cards_host)
-            card.setMinimumHeight(190)
+            card.setMinimumHeight(250)
             card.on_activate = self.play_index
             card.installEventFilter(self)
             self.cards.append(card)
