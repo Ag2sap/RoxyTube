@@ -272,8 +272,8 @@ class TvKeyboard(QWidget):
                     next_index = index + (1 if key == Qt.Key_Right else -1)
                     if 0 <= next_index < len(row_items):
                         row_items[next_index]["button"].setFocus()
-                        event.accept()
-                        return True
+                    event.accept()
+                    return True
                 elif key in (Qt.Key_Up, Qt.Key_Down):
                     next_row = item["row"] + (-1 if key == Qt.Key_Up else 1)
                     if next_row < -1:
@@ -2066,10 +2066,11 @@ class MainWindow(QMainWindow):
                         return True
                 if focus in (self.previous_video_button, self.rewind_button,
                              self.play_pause_button, self.fast_forward_button,
-                             self.next_video_button, self.stop_button):
+                             self.next_video_button, self.stop_button, self.fullscreen_button):
                     row = [self.previous_video_button, self.rewind_button,
                            self.play_pause_button, self.fast_forward_button,
-                           self.next_video_button, self.stop_button, self.volume_slider]
+                           self.next_video_button, self.stop_button,
+                           self.fullscreen_button, self.volume_slider]
                     pos = row.index(focus)
                     if key == Qt.Key_Left and pos > 0:
                         row[pos - 1].setFocus(); return True
@@ -2081,7 +2082,7 @@ class MainWindow(QMainWindow):
                         self.playlist_button.setFocus(); return True
                 if focus is self.quality:
                     if key == Qt.Key_Left:
-                        self.stop_button.setFocus(); return True
+                        self.fullscreen_button.setFocus(); return True
                     if key == Qt.Key_Right:
                         self.subtitle_box.setFocus(); return True
                     if key == Qt.Key_Up:
@@ -2092,7 +2093,7 @@ class MainWindow(QMainWindow):
                     if key == Qt.Key_Left:
                         self.quality.setFocus(); return True
                     if key == Qt.Key_Right:
-                        self.fullscreen_button.setFocus(); return True
+                        return True
                     if key == Qt.Key_Up:
                         self.seek_slider.setFocus(); return True
                     if key == Qt.Key_Down:
@@ -2180,14 +2181,20 @@ class MainWindow(QMainWindow):
                         self.mini_rewind_button.setFocus(); return True
                     if key == Qt.Key_Right:
                         self.minimize_button.setFocus(); return True
+                    if key == Qt.Key_Up:
+                        return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                         self.return_to_playback(); return True
                 if focus in mini_buttons:
                     pos = mini_buttons.index(focus)
-                    if key == Qt.Key_Left and pos > 0:
-                        mini_buttons[pos - 1].setFocus(); return True
-                    if key == Qt.Key_Right and pos < len(mini_buttons) - 1:
-                        mini_buttons[pos + 1].setFocus(); return True
+                    if key == Qt.Key_Left:
+                        if pos > 0:
+                            mini_buttons[pos - 1].setFocus()
+                        return True
+                    if key == Qt.Key_Right:
+                        if pos < len(mini_buttons) - 1:
+                            mini_buttons[pos + 1].setFocus()
+                        return True
                     if key == Qt.Key_Up:
                         self.mini_title_button.setFocus(); return True
                     if key == Qt.Key_Down:
@@ -2204,11 +2211,15 @@ class MainWindow(QMainWindow):
                          else self.keyboard_button).setFocus(); return True
                     if key == Qt.Key_Down:
                         self.keyboard_button.setFocus(); return True
+                    if key == Qt.Key_Up:
+                        return True
                 if focus is self.close_button:
                     if key == Qt.Key_Left:
                         self.minimize_button.setFocus(); return True
                     if key == Qt.Key_Down:
                         self.keyboard_button.setFocus(); return True
+                    if key in (Qt.Key_Right, Qt.Key_Up):
+                        return True
                 if key in (Qt.Key_Escape, Qt.Key_Back):
                     if self.keyboard_open:
                         self.set_keyboard_visible(False)
@@ -2225,6 +2236,8 @@ class MainWindow(QMainWindow):
                     if key == Qt.Key_Up:
                         if nav_index > 0:
                             self.nav_buttons[nav_index - 1].setFocus()
+                        return True
+                    if key == Qt.Key_Left:
                         return True
                     if key == Qt.Key_Right:
                         self.collapse_sidebar()
@@ -2300,6 +2313,8 @@ class MainWindow(QMainWindow):
                 if focus is self.search_button:
                     if key == Qt.Key_Left:
                         self.query.setFocus(); return True
+                    if key == Qt.Key_Right:
+                        return True
                     if key == Qt.Key_Down and self.cards:
                         self.cards[0].setFocus(); return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
@@ -2309,6 +2324,8 @@ class MainWindow(QMainWindow):
                         self.prev_page_button.setFocus(); return True
                     if key == Qt.Key_Right and focus is self.prev_page_button:
                         self.next_page_button.setFocus(); return True
+                    if key in (Qt.Key_Left, Qt.Key_Right):
+                        return True
                     if key == Qt.Key_Up:
                         if self.cards:
                             self.cards[-1].setFocus()
@@ -2352,7 +2369,7 @@ class MainWindow(QMainWindow):
     def restore_window(self):
         mode = self._activation_state
         self.showNormal()
-        if self._restore_geometry is not None and mode != "fullscreen":
+        if self._restore_geometry is not None:
             self.setGeometry(self._restore_geometry)
         if mode == "fullscreen" or self.is_playback_fullscreen:
             self.showFullScreen()
