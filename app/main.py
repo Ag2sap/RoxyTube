@@ -1745,6 +1745,9 @@ class MainWindow(QMainWindow):
                     return True
                 if self.fullscreen_controls_visible:
                     self.fullscreen_hide_timer.start(1000)
+                    if key == Qt.Key_Down and focus is self.player_page:
+                        self.seek_slider.setFocus(Qt.OtherFocusReason)
+                        return True
                     if key == Qt.Key_Up and focus is self.seek_slider:
                         self.hide_fullscreen_controls()
                         return True
@@ -1758,7 +1761,7 @@ class MainWindow(QMainWindow):
                 elif key == Qt.Key_Down:
                     self.show_fullscreen_controls(focus_slider=True)
                     return True
-                elif focus is self.player_page and key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
+                if focus is self.player_page and key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                     self.toggle_play_pause()
                     return True
             if self.pages.currentWidget() == self.player_page:
