@@ -948,6 +948,10 @@ class MainWindow(QMainWindow):
             return
         old_process = self.player_process
         self.player_process = None
+        if self.mpv_event_socket:
+            self.mpv_event_socket.abort()
+            self.mpv_event_socket.deleteLater()
+            self.mpv_event_socket = None
         if old_process and old_process.state() != QProcess.NotRunning:
             old_process.kill()
         self.ipc_path = f"/tmp/roxy-youtube-tv-{os.getpid()}-{self.current_index}.sock"
@@ -1384,7 +1388,7 @@ class MainWindow(QMainWindow):
                         active = self.nav_modes.index(self.feed_mode) if self.feed_mode in self.nav_modes else 0
                         self.nav_buttons[active].setFocus()
                         return True
-                    if key == Qt.Key_Right and idx + 1 < len(self.cards):
+                    if key == Qt.Key_Right and cols == 2 and idx + 1 < len(self.cards):
                         self.cards[idx+1].setFocus(); return True
                     if key == Qt.Key_Left and idx % cols:
                         self.cards[idx-1].setFocus(); return True
