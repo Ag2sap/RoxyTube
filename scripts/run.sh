@@ -2,4 +2,6 @@
 set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT"
-exec python3 app/main.py "$@"
+PYTHON="/home/Applications/.venv/bin/python"
+if [ ! -x "$PYTHON" ]; then PYTHON="python3"; fi
+exec "$PYTHON" app/main.py "$@"
