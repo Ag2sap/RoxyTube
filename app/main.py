@@ -76,12 +76,15 @@ class VirtualKeyboardDialog(QDialog):
         grid.setSpacing(5)
         layout.addLayout(grid)
         rows = ["1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"]
+        first_key = None
         for row_index, chars in enumerate(rows):
             offset = 0 if row_index < 2 else (1 if row_index == 2 else 2)
             for col, char in enumerate(chars):
                 button = QPushButton(char)
                 button.clicked.connect(lambda checked=False, key=char: self.add_text(key))
                 grid.addWidget(button, row_index, col + offset)
+                if first_key is None:
+                    first_key = button
         actions = [
             ("SPASI", lambda: self.add_text(" "), 4),
             ("HAPUS", self.backspace, 2),
@@ -94,6 +97,8 @@ class VirtualKeyboardDialog(QDialog):
             button.clicked.connect(callback)
             grid.addWidget(button, row_index, 0, 1, span)
             row_index += 1
+        if first_key:
+            first_key.setFocus()
 
     def add_text(self, value):
         self.preview.setText(self.preview.text() + value)
