@@ -950,10 +950,7 @@ class MainWindow(QMainWindow):
             return
         old_process = self.player_process
         self.player_process = None
-        if self.mpv_event_socket:
-            self.mpv_event_socket.abort()
-            self.mpv_event_socket.deleteLater()
-            self.mpv_event_socket = None
+        self.dispose_mpv_event_socket()
         if old_process and old_process.state() != QProcess.NotRunning:
             old_process.kill()
         self.ipc_path = f"/tmp/roxy-youtube-tv-{os.getpid()}-{self.current_index}.sock"
@@ -998,14 +995,28 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(250, lambda i=self.current_index, p=process:
                               self.connect_mpv_events(i, p))
 
+    def dispose_mpv_event_socket(self, sock=None):
+        """Detach an IPC socket before scheduling Qt object deletion."""
+        target = sock if sock is not None else self.mpv_event_socket
+        if target is None:
+            return
+        if target is self.mpv_event_socket:
+            self.mpv_event_socket = None
+        try:
+            target.abort()
+        except RuntimeError:
+            pass
+        try:
+            target.deleteLater()
+        except RuntimeError:
+            pass
+
     def connect_mpv_events(self, index, process):
         """Connect to MPV IPC so metadata work starts only after playback begins."""
         if (process is not self.player_process or index != self.current_index or
                 process.state() == QProcess.NotRunning):
             return
-        if self.mpv_event_socket:
-            self.mpv_event_socket.abort()
-            self.mpv_event_socket.deleteLater()
+        self.dispose_mpv_event_socket()
         sock = QLocalSocket(self)
         self.mpv_event_socket = sock
         self.mpv_event_buffer = ""
@@ -1031,8 +1042,9 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(250, lambda s=sock, i=index, p=process:
                               self.retry_mpv_event_connection(s, i, p))
         else:
-            sock.abort()
-            sock.deleteLater()
+            # Clear the member reference before deleteLater(); otherwise the
+            # next retry can see a Python wrapper for an already-deleted C++ socket.
+            self.dispose_mpv_event_socket(sock)
             QTimer.singleShot(250, lambda i=index, p=process:
                               self.connect_mpv_events(i, p))
 
@@ -1232,11 +1244,24 @@ class MainWindow(QMainWindow):
         # Reuse the live event channel whenever possible. This avoids racing
         # MPV's IPC socket creation and keeps remote controls responsive.
         event_socket = self.mpv_event_socket
-        if event_socket and event_socket.state() == QLocalSocket.ConnectedState:
-            if event_socket.write(payload) < 0:
-                return False
-            event_socket.flush()
-            return True
+        if event_socket is not None:
+            try:
+                connected = event_socket.state() == QLocalSocket.ConnectedState
+            except RuntimeError:
+                # Qt may have destroyed the C++ socket while its Python wrapper
+                # is still referenced; discard it and use a fresh IPC connection.
+                if event_socket is self.mpv_event_socket:
+                    self.mpv_event_socket = None
+                connected = False
+            if connected:
+                try:
+                    if event_socket.write(payload) < 0:
+                        return False
+                    event_socket.flush()
+                    return True
+                except RuntimeError:
+                    if event_socket is self.mpv_event_socket:
+                        self.mpv_event_socket = None
         socket = QLocalSocket(self)
         socket.connectToServer(self.ipc_path)
         if not socket.waitForConnected(1000):
