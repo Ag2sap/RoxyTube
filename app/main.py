@@ -4,7 +4,7 @@ from __future__ import annotations
 import json, os, shutil, sys
 from pathlib import Path
 from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QPainter, QPen, QColor
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDiskCache, QLocalSocket, QLocalServer
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
@@ -55,6 +55,35 @@ def thumbnail_url(entry):
                                    abs((x.get("width") or 320) - 320)))
         return usable[0]["url"]
     return entry.get("thumbnail")
+
+
+class CircularProgress(QWidget):
+    """Small ring indicator for the Home mini-player."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._value = 0
+        self.setFixedSize(18, 18)
+        self.setToolTip("Progress playback")
+
+    def setValue(self, value):
+        value = max(0, min(1000, int(value)))
+        if value != self._value:
+            self._value = value
+            self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = self.rect().adjusted(3, 3, -3, -3)
+        base_pen = QPen(QColor("#394657"), 2.4)
+        base_pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(base_pen)
+        painter.drawArc(rect, 0, 360 * 16)
+        if self._value:
+            progress_pen = QPen(QColor("#ff334f"), 2.4)
+            progress_pen.setCapStyle(Qt.RoundCap)
+            painter.setPen(progress_pen)
+            painter.drawArc(rect, 90 * 16, -int(360 * 16 * self._value / 1000))
 
 
 class TvKeyboard(QWidget):
@@ -325,6 +354,7 @@ class VideoCard(QFrame):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.setWindowFlag(Qt.FramelessWindowHint, True)
         self.setWindowTitle(APP_NAME)
         self.resize(700, 525)
         self.setMinimumSize(560, 420)
@@ -354,6 +384,10 @@ class MainWindow(QMainWindow):
         self.metadata_requested_index = None
         self.current_time_pos = 0.0
         self.duration_seconds = 0.0
+        self.stream_width = 0
+        self.stream_height = 0
+        self.current_channel = "YouTube"
+        self.current_duration_label = ""
         self.slider_dragging = False
         self.playback_paused = False
         self.playback_started = False
@@ -439,87 +473,99 @@ class MainWindow(QMainWindow):
         search_shell.addWidget(content, 1)
         self.feed_mode = "home"
         header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(5)
         logo = QLabel()
-        logo.setPixmap(self.style().standardIcon(QStyle.SP_MediaPlay).pixmap(22, 22))
-        brand = QLabel("YouTube Roxy")
+        logo.setPixmap(self.style().standardIcon(QStyle.SP_MediaPlay).pixmap(20, 20))
+        brand = QLabel("RoxyTube")
         brand.setObjectName("brand")
-        brand.setMaximumWidth(112)
+        brand.setMaximumWidth(92)
         header.addWidget(logo)
         header.addWidget(brand)
 
         self.mini_player = QFrame()
-        self.mini_player.setFixedWidth(278)
+        self.mini_player.setFixedWidth(248)
         self.mini_player.setStyleSheet(
             "QFrame{background:#171e28;border:1px solid #65758b;border-radius:6px;}"
         )
         mini_layout = QVBoxLayout(self.mini_player)
-        mini_layout.setContentsMargins(4, 3, 4, 3)
-        mini_layout.setSpacing(2)
+        mini_layout.setContentsMargins(3, 2, 3, 2)
+        mini_layout.setSpacing(1)
+        mini_title_row = QHBoxLayout()
+        mini_title_row.setContentsMargins(0, 0, 0, 0)
+        mini_title_row.setSpacing(3)
         self.mini_title_button = QPushButton("Tidak ada playback")
-        self.mini_title_button.setFixedHeight(22)
+        self.mini_title_button.setFixedHeight(21)
+        self.mini_title_button.setMinimumWidth(0)
+        self.mini_title_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.mini_title_button.setToolTip("Kembali ke video yang sedang diputar")
         self.mini_title_button.setStyleSheet(
-            "text-align:left;padding:1px 4px;font-size:11px;border:0;"
+            "text-align:left;padding:1px 2px;font-size:11px;border:0;"
         )
         self.mini_title_button.clicked.connect(self.return_to_playback)
-        mini_layout.addWidget(self.mini_title_button)
+        mini_title_row.addWidget(self.mini_title_button, 1)
+        self.mini_progress = CircularProgress()
+        mini_title_row.addWidget(self.mini_progress, 0, Qt.AlignVCenter)
+        mini_layout.addLayout(mini_title_row)
+
         mini_controls = QHBoxLayout()
         mini_controls.setSpacing(3)
-        self.mini_progress = QProgressBar()
-        self.mini_progress.setRange(0, 1000)
-        self.mini_progress.setValue(0)
-        self.mini_progress.setTextVisible(False)
-        self.mini_progress.setFixedWidth(76)
-        self.mini_progress.setFixedHeight(9)
-        self.mini_progress.setStyleSheet(
-            "QProgressBar{background:#394657;border:0;border-radius:3px;}"
-            "QProgressBar::chunk{background:#ff334f;border-radius:3px;}"
-        )
-        mini_controls.addWidget(self.mini_progress)
-        self.mini_rewind_button = QPushButton("-10")
-        self.mini_rewind_button.setFixedWidth(38)
+        self.mini_rewind_button = QPushButton()
+        self.mini_rewind_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSeekBackward))
+        self.mini_rewind_button.setFixedSize(30, 23)
         self.mini_rewind_button.setToolTip("Mundur 10 detik")
         self.mini_rewind_button.clicked.connect(lambda: self.seek_relative(-10))
         self.mini_play_pause_button = QPushButton()
         self.mini_play_pause_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
-        self.mini_play_pause_button.setFixedWidth(34)
+        self.mini_play_pause_button.setFixedSize(30, 23)
         self.mini_play_pause_button.setToolTip("Jeda / lanjut")
         self.mini_play_pause_button.clicked.connect(self.toggle_play_pause)
-        self.mini_fast_forward_button = QPushButton("+10")
-        self.mini_fast_forward_button.setFixedWidth(38)
+        self.mini_fast_forward_button = QPushButton()
+        self.mini_fast_forward_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSeekForward))
+        self.mini_fast_forward_button.setFixedSize(30, 23)
         self.mini_fast_forward_button.setToolTip("Maju 10 detik")
         self.mini_fast_forward_button.clicked.connect(lambda: self.seek_relative(10))
         self.mini_stop_button = QPushButton()
         self.mini_stop_button.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
-        self.mini_stop_button.setFixedWidth(30)
+        self.mini_stop_button.setFixedSize(30, 23)
         self.mini_stop_button.setToolTip("Stop playback")
         self.mini_stop_button.clicked.connect(self.stop_playback)
         for widget in (self.mini_rewind_button, self.mini_play_pause_button,
                        self.mini_fast_forward_button, self.mini_stop_button):
-            widget.setFixedHeight(23)
+            widget.setIconSize(QSize(16, 16))
             widget.setFocusPolicy(Qt.StrongFocus)
             mini_controls.addWidget(widget)
+        mini_controls.addStretch(1)
         mini_layout.addLayout(mini_controls)
         header.addWidget(self.mini_player)
+        header.addStretch(1)
         self.mini_player.hide()
 
-        self.window_controls_widget = QWidget()
+        # Pin controls to the actual Home window corner, independent of sidebar width.
+        self.window_controls_widget = QWidget(self.search_page)
+        self.window_controls_widget.setFixedSize(57, 26)
         window_controls = QHBoxLayout(self.window_controls_widget)
         window_controls.setContentsMargins(0, 0, 0, 0)
-        window_controls.setSpacing(3)
+        window_controls.setSpacing(1)
         self.minimize_button = QPushButton()
         self.minimize_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMinButton))
-        self.minimize_button.setFixedSize(30, 28)
+        self.minimize_button.setFixedSize(27, 25)
         self.minimize_button.setToolTip("Minimize aplikasi")
         self.minimize_button.clicked.connect(self.showMinimized)
         self.close_button = QPushButton()
         self.close_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarCloseButton))
-        self.close_button.setFixedSize(30, 28)
+        self.close_button.setFixedSize(27, 25)
         self.close_button.setToolTip("Tutup aplikasi dan hentikan playback")
         self.close_button.clicked.connect(self.close)
+        for widget in (self.minimize_button, self.close_button):
+            widget.setIconSize(QSize(15, 15))
+            widget.setStyleSheet(
+                "QPushButton{padding:0;border:0;background:transparent;border-radius:4px;}"
+                "QPushButton:focus{background:#3a4b60;border:2px solid #ffd166;}"
+            )
         window_controls.addWidget(self.minimize_button)
         window_controls.addWidget(self.close_button)
-        header.addWidget(self.window_controls_widget)
+        self.position_window_controls()
         self.root_layout.addLayout(header)
 
         search_row = QHBoxLayout()
