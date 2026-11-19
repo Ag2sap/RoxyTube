@@ -617,9 +617,6 @@ class MainWindow(QMainWindow):
             event = message.get("event")
             if event == "playback-restart":
                 self.schedule_metadata_after_start(index, process, 1200)
-            elif event == "file-loaded":
-                # Fallback for audio-only or unusual streams without playback-restart.
-                self.schedule_metadata_after_start(index, process, 3000)
             elif event == "property-change" and message.get("name") == "time-pos":
                 self.schedule_metadata_after_start(index, process, 1200)
 
