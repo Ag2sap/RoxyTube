@@ -562,6 +562,7 @@ class MainWindow(QMainWindow):
         self.seek_slider.setSingleStep(5)
         self.seek_slider.setPageStep(15)
         self.seek_slider.setFocusPolicy(Qt.StrongFocus)
+        self.seek_slider.setToolTip("Geser untuk mencari posisi video; kiri/kanan untuk maju atau mundur 5 detik")
         self.seek_slider.setStyleSheet("""
             QSlider#playbackSlider { min-height:22px; }
             QSlider#playbackSlider::groove:horizontal { height:5px; background:#455365; border-radius:2px; }
@@ -586,6 +587,7 @@ class MainWindow(QMainWindow):
         self.play_pause_button = QPushButton("Ⅱ")
         self.play_pause_button.setToolTip("Jeda / lanjut")
         self.play_pause_button.clicked.connect(self.toggle_play_pause)
+        self.play_pause_button.setFocusPolicy(Qt.StrongFocus)
         self.next_video_button = QPushButton("⏭")
         self.next_video_button.setToolTip("Video berikutnya")
         self.next_video_button.clicked.connect(lambda: self.play_index(self.current_index + 1))
@@ -1206,14 +1208,21 @@ class MainWindow(QMainWindow):
     def mpv_command(self, command):
         if not self.player_process or self.player_process.state() == QProcess.NotRunning:
             return False
+        payload = json.dumps({"command": command}).encode("utf-8") + b"\n"
+        # Reuse the live event channel whenever possible. This avoids racing
+        # MPV's IPC socket creation and keeps remote controls responsive.
+        event_socket = self.mpv_event_socket
+        if event_socket and event_socket.state() == QLocalSocket.ConnectedState:
+            if event_socket.write(payload) < 0:
+                return False
+            event_socket.flush()
+            return True
         socket = QLocalSocket(self)
         socket.connectToServer(self.ipc_path)
-        if not socket.waitForConnected(500):
+        if not socket.waitForConnected(1000):
             socket.deleteLater()
             return False
-        payload = json.dumps({"command": command}).encode("utf-8") + b"\n"
-        written = socket.write(payload)
-        if written < 0 or not socket.waitForBytesWritten(500):
+        if socket.write(payload) < 0 or not socket.waitForBytesWritten(750):
             socket.abort()
             socket.deleteLater()
             return False
@@ -1273,6 +1282,42 @@ class MainWindow(QMainWindow):
                 if key in (Qt.Key_Escape, Qt.Key_Back):
                     self.back_to_results()
                     return True
+                if focus is self.seek_slider:
+                    if key in (Qt.Key_Left, Qt.Key_Right):
+                        step = 10 if QApplication.keyboardModifiers() & Qt.ShiftModifier else 5
+                        target = self.seek_slider.value() + (step if key == Qt.Key_Right else -step)
+                        target = max(0, min(int(self.duration_seconds), target))
+                        self.seek_slider.setValue(target)
+                        self.current_time_pos = float(target)
+                        self.mpv_command(["seek", target, "absolute+exact"])
+                        self.elapsed_label.setText(self.format_time(target))
+                        return True
+                    if key == Qt.Key_Down:
+                        self.previous_video_button.setFocus()
+                        return True
+                if focus in (self.previous_video_button, self.play_pause_button,
+                             self.next_video_button, self.stop_button):
+                    row = [self.previous_video_button, self.play_pause_button,
+                           self.next_video_button, self.stop_button]
+                    pos = row.index(focus)
+                    if key == Qt.Key_Left and pos > 0:
+                        row[pos - 1].setFocus(); return True
+                    if key == Qt.Key_Right and pos < len(row) - 1:
+                        row[pos + 1].setFocus(); return True
+                    if key == Qt.Key_Up:
+                        self.seek_slider.setFocus(); return True
+                if focus is self.quality:
+                    if key == Qt.Key_Left:
+                        self.stop_button.setFocus(); return True
+                    if key == Qt.Key_Right:
+                        self.subtitle_box.setFocus(); return True
+                    if key == Qt.Key_Up:
+                        self.seek_slider.setFocus(); return True
+                if focus is self.subtitle_box:
+                    if key == Qt.Key_Left:
+                        self.quality.setFocus(); return True
+                    if key == Qt.Key_Up:
+                        self.seek_slider.setFocus(); return True
                 if key == Qt.Key_Left and focus is self.subtitle_box:
                     self.quality.setFocus()
                     return True
