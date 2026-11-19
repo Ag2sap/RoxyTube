@@ -13,9 +13,16 @@ A lightweight YouTube TV-style frontend for HG680P / Armbian Noble (ARM64).
 - Android-TV-inspired keyboard rows with letters, digits, persistent CAPS, one-shot SHIFT, symbol page, comma, period, punctuation, space, backspace, and clear.
 - Search results shown as large 16:9 thumbnail cards in a two-column grid on 4:3 layouts, with title, channel/artist and duration.
 - D-pad navigation across search controls, keyboard and thumbnail cards.
-- PlasmaTube-inspired watch page: prominent embedded video, playback controls, quality/subtitle actions, and a lower queue/description panel.
+- PlasmaTube-inspired watch page with embedded MPV, a timeline directly below the video, 10-second rewind/forward, playback controls, and a lower queue/description panel.
+- D-pad navigation across the timeline, playback controls, queue items, and scrollable description.
+- Subtitle choices are enumerated after playback starts; the selected external track is applied to the active MPV session, preferring WebVTT when available.
+- Quality preference: Auto, 360p, 480p, 720p (limited by formats YouTube exposes). A quality change restarts the stream at the current playback position and reapplies the selected subtitle.
+- Automatic next-video playback follows the current result/queue order.
+- Fullscreen playback hides surrounding UI; the timeline and controls reappear on mouse movement near the bottom or D-pad Down, then auto-hide after one second of inactivity.
+- Back from playback returns to the Home/results page while audio playback continues. A bordered mini-player in the Home header shows the scrolling title, progress, and remote-friendly controls; selecting its title returns to the active video without restarting it.
+- Home-only window controls minimize the application without stopping playback or close the application and stop playback after confirmation.
+- Playback and window controls use Qt standard icons rather than relying on emoji glyph availability.
 - Video playback through system MPV.
-- Quality preference: Auto, 360p, 480p, 720p (limited by formats YouTube exposes).
 
 ## Requirements
 
