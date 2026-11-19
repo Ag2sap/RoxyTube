@@ -502,23 +502,29 @@ class MainWindow(QMainWindow):
         player_header.addWidget(self.player_title, 1)
         player_layout.addLayout(player_header)
 
-        body = QHBoxLayout()
+        # PlasmaTube-inspired watch page: wide video first, queue/details below.
+        # A vertical flow is better suited to the device's 4:3 PAL display.
+        body = QVBoxLayout()
+        body.setSpacing(5)
         self.video_surface = QWidget()
         self.video_surface.setMinimumSize(300, 170)
+        self.video_surface.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.video_surface.setStyleSheet("background:#000000;border:1px solid #384354;")
-        body.addWidget(self.video_surface, 3)
+        body.addWidget(self.video_surface, 5)
         self.side_panel = QFrame()
-        self.side_panel.setMinimumWidth(150)
-        self.side_panel.setMaximumWidth(235)
+        self.side_panel.setMinimumWidth(0)
+        self.side_panel.setMaximumWidth(16777215)
+        self.side_panel.setMaximumHeight(112)
         self.side_panel.setStyleSheet("QFrame{background:#171e28;border:1px solid #354253;border-radius:7px;}")
         side_layout = QVBoxLayout(self.side_panel)
-        side_layout.setContentsMargins(6, 6, 6, 6)
+        side_layout.setContentsMargins(5, 4, 5, 4)
+        side_layout.setSpacing(3)
         side_buttons = QHBoxLayout()
-        self.playlist_button = QPushButton("☷")
-        self.playlist_button.setToolTip("Playlist")
+        self.playlist_button = QPushButton("☷  Berikutnya")
+        self.playlist_button.setToolTip("Antrean video")
         self.playlist_button.clicked.connect(lambda: self.show_side_panel("playlist"))
-        self.description_button = QPushButton("≡")
-        self.description_button.setToolTip("Deskripsi")
+        self.description_button = QPushButton("≡  Deskripsi")
+        self.description_button.setToolTip("Deskripsi video")
         self.description_button.clicked.connect(lambda: self.show_side_panel("description"))
         side_buttons.addWidget(self.playlist_button)
         side_buttons.addWidget(self.description_button)
@@ -529,9 +535,10 @@ class MainWindow(QMainWindow):
         self.side_text_host = QWidget()
         self.side_text_layout = QVBoxLayout(self.side_text_host)
         self.side_text_layout.setContentsMargins(2, 2, 2, 2)
+        self.side_text_layout.setSpacing(2)
         self.side_content.setWidget(self.side_text_host)
         side_layout.addWidget(self.side_content, 1)
-        body.addWidget(self.side_panel, 1)
+        body.addWidget(self.side_panel, 2)
         player_layout.addLayout(body, 1)
 
         controls = QHBoxLayout()
@@ -679,13 +686,16 @@ class MainWindow(QMainWindow):
         self.current_page = 0
         self.search_button.setEnabled(False)
         if mode == "home":
-            target = "https://www.youtube.com/feed/recommended"
-            self.results_heading.setText("BERANDA  •  REKOMENDASI YOUTUBE")
-            self.status.setText("Memuat rekomendasi publik YouTube…")
+            # Public search is available without a signed-in YouTube account.
+            target = "ytsearch30:video populer Indonesia"
+            self.results_heading.setText("BERANDA  •  PILIHAN VIDEO INDONESIA")
+            self.status.setText("Memuat pilihan video publik…")
         else:
-            target = "https://www.youtube.com/feed/trending?gl=ID"
-            self.results_heading.setText("TRENDING 🔥  •  INDONESIA")
-            self.status.setText("Memuat video Trending Indonesia…")
+            # YouTube retired the old /feed/trending endpoint. Use a public
+            # relevance search instead of relying on that obsolete playlist.
+            target = "ytsearch30:video trending Indonesia terbaru"
+            self.results_heading.setText("TRENDING 🔥  •  POPULER DI INDONESIA")
+            self.status.setText("Mencari video populer di Indonesia…")
         process = QProcess(self)
         self.search_process = process
         process.setProgram(YTDLP)
@@ -735,9 +745,9 @@ class MainWindow(QMainWindow):
         self.search_button.setEnabled(True)
         if exit_code != 0 or not raw.strip():
             if self.feed_mode == "home":
-                self.status.setText("Rekomendasi publik tidak dapat dimuat. Periksa koneksi atau dukungan yt-dlp.")
+                self.status.setText("Beranda belum mendapat hasil pencarian publik. Periksa koneksi atau yt-dlp.")
             elif self.feed_mode == "trending":
-                self.status.setText("Trending YouTube Indonesia tidak tersedia dari sumber publik saat ini.")
+                self.status.setText("Pencarian video populer Indonesia gagal. Periksa koneksi atau yt-dlp.")
             else:
                 self.status.setText("Pencarian gagal. Periksa koneksi / yt-dlp.")
                 if err.strip():
@@ -762,18 +772,18 @@ class MainWindow(QMainWindow):
                 })
             if not self.results:
                 if self.feed_mode == "home":
-                    self.status.setText("Belum ada rekomendasi publik yang dapat ditampilkan.")
+                    self.status.setText("Belum ada video publik untuk ditampilkan di Beranda.")
                 elif self.feed_mode == "trending":
-                    self.status.setText("Daftar Trending Indonesia kosong atau tidak didukung YouTube.")
+                    self.status.setText("Belum ada hasil video populer Indonesia saat ini.")
                 else:
                     self.status.setText("Tidak ada video yang ditemukan.")
                 return
             self.render_page()
             if self.feed_mode == "home":
-                self.results_heading.setText("BERANDA  •  REKOMENDASI YOUTUBE")
+                self.results_heading.setText("BERANDA  •  PILIHAN VIDEO INDONESIA")
                 self.status.setText(f"{len(self.results)} rekomendasi publik.")
             elif self.feed_mode == "trending":
-                self.results_heading.setText("TRENDING 🔥  •  INDONESIA")
+                self.results_heading.setText("TRENDING 🔥  •  POPULER DI INDONESIA")
                 self.status.setText(f"{len(self.results)} video Trending.")
             else:
                 self.status.setText(f"{len(self.results)} video ditemukan.")
