@@ -2413,7 +2413,15 @@ class MainWindow(QMainWindow):
                             step = max(bar.singleStep(), 72)
                             bar.setValue(max(bar.minimum(), bar.value() - step))
                             return True
-                        self.keyboard_button.setFocus()
+                        total_pages = max(
+                            1, (len(self.results) + self.page_size - 1) // self.page_size
+                        )
+                        if (self.current_page == total_pages - 1 and
+                                self.prev_page_button.isEnabled()):
+                            # On the final page, Up from the top row returns to Prev.
+                            self.prev_page_button.setFocus(Qt.OtherFocusReason)
+                        else:
+                            self.keyboard_button.setFocus(Qt.OtherFocusReason)
                         return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                         # Use the card's absolute results index, not its position
