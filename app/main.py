@@ -2001,15 +2001,18 @@ class MainWindow(QMainWindow):
             self.mini_title_timer.stop()
             return
         cycle = text + "   "
+        # Duplicate the cycle so the visible slice can cross the end without
+        # shrinking or jumping back to the beginning.
+        loop_text = cycle + cycle
         start = self.mini_title_offset
         end = start
         while end < start + len(cycle):
-            if metrics.horizontalAdvance(cycle[start:end + 1]) > available:
+            if metrics.horizontalAdvance(loop_text[start:end + 1]) > available:
                 break
             end += 1
         if end == start:
             end += 1
-        self.mini_title_button.setText(cycle[start:end])
+        self.mini_title_button.setText(loop_text[start:end])
         self.mini_title_offset = (start + 1) % len(cycle)
 
     def update_stream_resolution(self):
@@ -2052,6 +2055,17 @@ class MainWindow(QMainWindow):
         if event.type() == QEvent.KeyPress:
             key, focus = event.key(), QApplication.focusWidget()
             if key == Qt.Key_Space and isinstance(watched, QPushButton):
+                return True
+            if (self.pages.currentWidget() == self.player_page
+                    and key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select)
+                    and isinstance(focus, QPushButton)
+                    and (focus in (
+                        self.back_button, self.previous_video_button, self.rewind_button,
+                        self.play_pause_button, self.fast_forward_button,
+                        self.next_video_button, self.stop_button, self.fullscreen_button,
+                        self.playlist_button, self.description_button
+                    ) or focus in self.playlist_items)):
+                focus.click()
                 return True
             if self.is_playback_fullscreen:
                 if key in (Qt.Key_Escape, Qt.Key_Back):
