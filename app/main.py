@@ -393,11 +393,13 @@ class VideoCard(QFrame):
         self.title_label = QLabel(title)
         self.title_label.setWordWrap(True)
         self.title_label.setMaximumHeight(38)
-        self.title_label.setStyleSheet("font-size:13px;font-weight:700;color:#f4f6f8;border:0;")
+        self.title_label.setStyleSheet(
+            "background:transparent;font-size:13px;font-weight:700;color:#f4f6f8;border:0;")
         layout.addWidget(self.title_label)
         self.meta_label = QLabel(channel)
         self.meta_label.setWordWrap(False)
-        self.meta_label.setStyleSheet("font-size:10px;color:#aeb8c5;border:0;")
+        self.meta_label.setStyleSheet(
+            "background:transparent;font-size:12px;font-weight:700;color:#aeb8c5;border:0;")
         layout.addWidget(self.meta_label)
 
     def resizeEvent(self, event):
@@ -483,6 +485,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet("""
             QMainWindow, QWidget { background:#101318; color:#f4f6f8; font-family:Sans; }
             QLabel#brand { color:#ffffff; font-size:17px; font-weight:750; }
+            QLabel#brandHeader { color:#ffffff; font-size:20px; font-weight:800; }
             QLabel#hint { color:#aeb8c5; font-size:11px; }
             QLineEdit,QComboBox { background:#202733; color:white; border:2px solid #465366;
                 border-radius:7px; padding:5px 7px; font-size:13px; min-height:23px; }
@@ -548,10 +551,11 @@ class MainWindow(QMainWindow):
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(5)
         logo = QLabel()
-        logo.setPixmap(youtube_logo_icon(22).pixmap(22, 22))
+        logo.setFixedSize(28, 28)
+        logo.setPixmap(youtube_logo_icon(28).pixmap(28, 28))
         brand = QLabel("RoxyTube")
-        brand.setObjectName("brand")
-        brand.setMaximumWidth(92)
+        brand.setObjectName("brandHeader")
+        brand.setMaximumWidth(112)
         header.addWidget(logo)
         header.addWidget(brand)
 
@@ -794,7 +798,8 @@ class MainWindow(QMainWindow):
         self.player_meta.setObjectName("hint")
         self.player_meta.setWordWrap(False)
         self.player_meta.setStyleSheet(
-            "color:#b9c5d3;font-size:11px;padding:2px 4px;border:0;")
+            "background:transparent;color:#b9c5d3;font-size:12px;font-weight:700;"
+            "padding:2px 4px;border:0;")
         self.resolution_label = QLabel("")
         self.resolution_label.setObjectName("hint")
         self.resolution_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
