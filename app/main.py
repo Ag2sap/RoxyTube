@@ -3,7 +3,7 @@
 from __future__ import annotations
 import json, os, shutil, sys
 from pathlib import Path
-from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve, QSize
+from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve, QSize, QRect
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QIcon, QPainterPath
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDiskCache, QLocalSocket, QLocalServer
 from PySide6.QtWidgets import (
@@ -392,6 +392,7 @@ class VideoCard(QFrame):
         thumb_layout = QGridLayout(self.thumbnail_frame)
         thumb_layout.setContentsMargins(0, 0, 5, 5)
         self.image = QLabel(" ")
+        self._thumbnail_pixmap = None
         self.image.setAlignment(Qt.AlignCenter)
         self.image.setMinimumHeight(70)
         self.image.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -430,9 +431,28 @@ class VideoCard(QFrame):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        height = max(70, int((self.width() - 20) * 9 / 16))
-        self.thumbnail_frame.setFixedHeight(height)
-        self.image.setFixedHeight(height)
+        # Defer until the parent grid has assigned the final column width.
+        QTimer.singleShot(0, self.sync_thumbnail_geometry)
+
+    def sync_thumbnail_geometry(self):
+        width = max(1, self.thumbnail_frame.width() - 5)
+        height = max(70, int(width * 9 / 16) + 5)
+        if self.thumbnail_frame.height() != height:
+            self.thumbnail_frame.setFixedHeight(height)
+        QTimer.singleShot(0, self.update_thumbnail_pixmap)
+
+    def update_thumbnail_pixmap(self):
+        pixmap = self._thumbnail_pixmap
+        width, height = self.image.width(), self.image.height()
+        if pixmap is None or pixmap.isNull() or width < 1 or height < 1:
+            return
+        # Fill the same 16:9 viewport on every card, cropping equally at center.
+        scaled = pixmap.scaled(
+            width, height, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+        )
+        x = max(0, (scaled.width() - width) // 2)
+        y = max(0, (scaled.height() - height) // 2)
+        self.image.setPixmap(scaled.copy(QRect(x, y, width, height)))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and callable(self.on_activate):
@@ -442,9 +462,9 @@ class VideoCard(QFrame):
     def set_thumbnail(self, pixmap):
         if pixmap.isNull():
             return
+        self._thumbnail_pixmap = QPixmap(pixmap)
         self.image.setText("")
-        self.image.setPixmap(pixmap.scaled(max(1, self.image.width()),
-            max(1, self.image.height()), Qt.KeepAspectRatio, Qt.FastTransformation))
+        self.update_thumbnail_pixmap()
 
 
 class MainWindow(QMainWindow):
@@ -721,6 +741,9 @@ class MainWindow(QMainWindow):
         self.cards_grid = QGridLayout(self.cards_host)
         self.cards_grid.setContentsMargins(2, 2, 2, 2)
         self.cards_grid.setSpacing(8)
+        # Equal column stretch keeps left and right cards exactly the same width.
+        self.cards_grid.setColumnStretch(0, 1)
+        self.cards_grid.setColumnStretch(1, 1)
         self.scroll.setWidget(self.cards_host)
         self.root_layout.addWidget(self.scroll, 1)
 
@@ -1019,6 +1042,8 @@ class MainWindow(QMainWindow):
             return
         # Recommended/Home uses the same two-column grid as Search.
         columns = 2
+        self.cards_grid.setColumnStretch(0, 1)
+        self.cards_grid.setColumnStretch(1, 1)
         for i, card in enumerate(self.cards):
             self.cards_grid.removeWidget(card)
             self.cards_grid.addWidget(card, i // columns, i % columns)
