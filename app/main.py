@@ -821,12 +821,24 @@ class MainWindow(QMainWindow):
         self.player_meta.setWordWrap(False)
         self.player_meta.setStyleSheet(
             "color:#b9c5d3;font-size:11px;padding:2px 4px;border:0;")
+        self.player_views_label = QLabel("")
+        self.player_views_label.setObjectName("hint")
+        self.player_views_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.player_views_label.setStyleSheet(
+            "color:#b9c5d3;font-size:11px;padding:2px 4px;border:0;")
+        self.player_duration_label = QLabel("")
+        self.player_duration_label.setObjectName("hint")
+        self.player_duration_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.player_duration_label.setStyleSheet(
+            "color:#b9c5d3;font-size:11px;padding:2px 4px;border:0;")
         self.resolution_label = QLabel("")
         self.resolution_label.setObjectName("hint")
         self.resolution_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.resolution_label.setStyleSheet(
             "color:#b9c5d3;font-size:11px;padding:2px 4px;border:0;")
         meta_row.addWidget(self.player_meta, 1)
+        meta_row.addWidget(self.player_views_label, 0)
+        meta_row.addWidget(self.player_duration_label, 0)
         meta_row.addWidget(self.resolution_label, 0)
         body.addLayout(meta_row)
         self.side_panel = QFrame()
@@ -1342,6 +1354,8 @@ class MainWindow(QMainWindow):
         duration = video.get("duration") or ""
         self.current_channel = channel
         self.current_duration_label = duration
+        self.player_views_label.setText(video.get("view_count") or "")
+        self.player_views_label.setVisible(bool(video.get("view_count")))
         self.stream_width = self.stream_height = 0
         self.update_stream_resolution()
         self.loading_bar.show()
@@ -1654,6 +1668,11 @@ class MainWindow(QMainWindow):
             self.duration_seconds = max(0.0, float(data["duration"]))
             self.playback_queue[index]["duration_seconds"] = self.duration_seconds
             self.update_timeline(self.current_time_pos, self.duration_seconds)
+        view_count = format_view_count(data.get("view_count"))
+        if view_count:
+            self.playback_queue[index]["view_count"] = view_count
+            self.player_views_label.setText(view_count)
+            self.player_views_label.show()
         description = data.get("description") or self.playback_queue[index].get("description") or "Deskripsi tidak tersedia."
         self.playback_queue[index]["description"] = description
         self.show_side_panel("description", description)
@@ -1969,6 +1988,8 @@ class MainWindow(QMainWindow):
         self.showFullScreen()
         self.player_header_widget.hide()
         self.player_meta.hide()
+        self.player_views_label.hide()
+        self.player_duration_label.hide()
         self.resolution_label.hide()
         self.side_panel.hide()
         self.player_status.hide()
@@ -1998,6 +2019,8 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, lambda: self.setGeometry(geometry))
         self.player_header_widget.show()
         self.player_meta.show()
+        self.player_views_label.setVisible(bool(self.player_views_label.text()))
+        self.player_duration_label.setVisible(bool(self.player_duration_label.text()))
         self.resolution_label.show()
         self.side_panel.show()
         self.player_status.show()
@@ -2077,10 +2100,8 @@ class MainWindow(QMainWindow):
         self.mini_title_offset = (start + 1) % len(cycle)
 
     def update_stream_resolution(self):
-        details = [self.current_channel or "YouTube"]
-        if self.current_duration_label:
-            details.append(self.current_duration_label)
-        self.player_meta.setText("  •  ".join(details))
+        self.player_meta.setText(self.current_channel or "YouTube")
+        self.player_duration_label.setText(self.current_duration_label or "")
         self.resolution_label.setText(
             f"{self.stream_width}×{self.stream_height} ({self.stream_height}p)"
             if self.stream_width > 0 and self.stream_height > 0 else ""
