@@ -1250,6 +1250,18 @@ class MainWindow(QMainWindow):
             self.current_page = target
             self.render_page()
 
+            # Keep remote focus in the pagination row after rebuilding cards.
+            # Next becomes disabled on the final page, so anchor focus on Prev.
+            focus_target = self.next_page_button if delta > 0 else self.prev_page_button
+            if not focus_target.isEnabled():
+                focus_target = self.prev_page_button if self.prev_page_button.isEnabled() else self.next_page_button
+            QTimer.singleShot(
+                0,
+                lambda button=focus_target: (
+                    button.setFocus(Qt.OtherFocusReason) if button.isEnabled() else None
+                )
+            )
+
     @staticmethod
     def process_is_running(process):
         """Return process state safely even if Qt has already deleted its C++ object."""
