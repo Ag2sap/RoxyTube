@@ -2449,13 +2449,27 @@ class MainWindow(QMainWindow):
                         self.search(); return True
                 if focus in (self.prev_page_button, self.next_page_button):
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
-                        focus.click()
+                        if focus.isEnabled():
+                            focus.click()
                         return True
                     if key == Qt.Key_Left and focus is self.next_page_button:
-                        self.prev_page_button.setFocus(); return True
+                        target = self.prev_page_button
+                        if target.isEnabled():
+                            target.setFocus(Qt.OtherFocusReason)
+                        return True
                     if key == Qt.Key_Right and focus is self.prev_page_button:
-                        self.next_page_button.setFocus(); return True
+                        # Never send focus to a disabled Next button at the last page.
+                        if self.next_page_button.isEnabled():
+                            self.next_page_button.setFocus(Qt.OtherFocusReason)
+                        else:
+                            self.prev_page_button.setFocus(Qt.OtherFocusReason)
+                        return True
                     if key in (Qt.Key_Left, Qt.Key_Right):
+                        # Keep focus anchored when the adjacent page action is disabled.
+                        if focus is self.next_page_button and not focus.isEnabled():
+                            self.prev_page_button.setFocus(Qt.OtherFocusReason)
+                        elif focus is self.prev_page_button and not focus.isEnabled():
+                            self.next_page_button.setFocus(Qt.OtherFocusReason)
                         return True
                     if key == Qt.Key_Up:
                         if self.cards:
