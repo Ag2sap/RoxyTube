@@ -2189,8 +2189,11 @@ class MainWindow(QMainWindow):
                     if key == Qt.Key_Up:
                         self.subtitle_box.setFocus(Qt.OtherFocusReason); return True
                     if key == Qt.Key_Down:
-                        if focus is self.playlist_button and self.playlist_items:
-                            self.playlist_items[0].setFocus(Qt.OtherFocusReason)
+                        if focus is self.playlist_button:
+                            if not self.playlist_items:
+                                self.show_side_panel("playlist")
+                            if self.playlist_items:
+                                self.playlist_items[0].setFocus(Qt.OtherFocusReason)
                         return True
                 if key == Qt.Key_Left and focus is self.subtitle_box:
                     self.quality.setFocus()
