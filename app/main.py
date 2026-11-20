@@ -3,7 +3,7 @@
 from __future__ import annotations
 import json, os, shutil, sys
 from pathlib import Path
-from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve, QSize
+from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve, QSize, QRect
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QIcon, QPainterPath
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDiskCache, QLocalSocket, QLocalServer
 from PySide6.QtWidgets import (
@@ -135,6 +135,21 @@ def thumbnail_url(entry):
                                    abs((x.get("width") or 320) - 320)))
         return usable[0]["url"]
     return entry.get("thumbnail")
+
+
+def format_view_count(value):
+    """Format YouTube views compactly for the video-card metadata row."""
+    try:
+        count = max(0, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return ""
+    if count >= 1_000_000_000:
+        return f"{count / 1_000_000_000:.1f}".replace(".", ",") + " M ditonton"
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}".replace(".", ",") + " jt ditonton"
+    if count >= 1_000:
+        return f"{count / 1_000:.1f}".replace(".", ",") + " rb ditonton"
+    return f"{count:,}".replace(",", ".") + " ditonton"
 
 
 class TvKeyboard(QWidget):
@@ -352,16 +367,18 @@ class TvKeyboard(QWidget):
 
 
 class VideoCard(QFrame):
-    def __init__(self, index, title, channel, duration, parent=None):
+    def __init__(self, index, title, channel, duration, view_count="", parent=None):
         super().__init__(parent)
         self.index = index
         self.on_activate = None
         self.setObjectName("videoCard")
         self.setFocusPolicy(Qt.StrongFocus)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        # Ignore content-derived width hints so both grid columns stay equal on every page.
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.setStyleSheet("""
             QFrame#videoCard { background:#1a202a; border:2px solid #303b4a; border-radius:9px; }
-            QFrame#videoCard:focus { border:3px solid #ffd166; background:#29384b; }
+            QFrame#videoCard:focus { background:#29384b; border:3px solid #ffd166; }
+            QFrame#videoCard:focus QLabel#videoTitle { color:#ffd166; }
         """)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(7, 7, 7, 7)
@@ -370,15 +387,18 @@ class VideoCard(QFrame):
         # Large 16:9 thumbnail with duration overlaid in its bottom-right corner.
         self.thumbnail_frame = QFrame()
         self.thumbnail_frame.setObjectName("thumbnailFrame")
-        self.thumbnail_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.thumbnail_frame.setMinimumWidth(0)
+        self.thumbnail_frame.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.thumbnail_frame.setStyleSheet(
             "QFrame#thumbnailFrame { background:#252e3b; border:0; border-radius:5px; }")
         thumb_layout = QGridLayout(self.thumbnail_frame)
         thumb_layout.setContentsMargins(0, 0, 5, 5)
         self.image = QLabel(" ")
+        self._thumbnail_pixmap = None
         self.image.setAlignment(Qt.AlignCenter)
+        self.image.setMinimumWidth(0)
         self.image.setMinimumHeight(70)
-        self.image.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.image.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         self.image.setStyleSheet("background:transparent;color:#9ba8b8;border:0;font-size:11px;")
         thumb_layout.addWidget(self.image, 0, 0)
         self.duration_label = QLabel(duration or "")
@@ -391,20 +411,54 @@ class VideoCard(QFrame):
         layout.addWidget(self.thumbnail_frame)
 
         self.title_label = QLabel(title)
+        self.title_label.setObjectName("videoTitle")
         self.title_label.setWordWrap(True)
+        self.title_label.setMinimumWidth(0)
         self.title_label.setMaximumHeight(38)
-        self.title_label.setStyleSheet("font-size:13px;font-weight:700;color:#f4f6f8;border:0;")
+        self.title_label.setStyleSheet("font-size:13px;font-weight:700;color:#f4f6f8;background:transparent;border:0;")
         layout.addWidget(self.title_label)
+        meta_row = QHBoxLayout()
+        meta_row.setContentsMargins(0, 0, 0, 0)
+        meta_row.setSpacing(5)
         self.meta_label = QLabel(channel)
         self.meta_label.setWordWrap(False)
-        self.meta_label.setStyleSheet("font-size:10px;color:#aeb8c5;border:0;")
-        layout.addWidget(self.meta_label)
+        self.meta_label.setMinimumWidth(0)
+        self.meta_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.meta_label.setStyleSheet("font-size:12px;font-weight:700;color:#aeb8c5;background:transparent;border:0;")
+        meta_row.addWidget(self.meta_label, 1)
+        self.views_label = QLabel(view_count)
+        self.views_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.views_label.setWordWrap(False)
+        self.views_label.setMinimumWidth(0)
+        self.views_label.setStyleSheet("font-size:11px;font-weight:700;color:#aeb8c5;background:transparent;border:0;")
+        self.views_label.setVisible(bool(view_count))
+        meta_row.addWidget(self.views_label, 0)
+        layout.addLayout(meta_row)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        height = max(70, int((self.width() - 20) * 9 / 16))
-        self.thumbnail_frame.setFixedHeight(height)
-        self.image.setFixedHeight(height)
+        # Defer until the parent grid has assigned the final column width.
+        QTimer.singleShot(0, self.sync_thumbnail_geometry)
+
+    def sync_thumbnail_geometry(self):
+        width = max(1, self.thumbnail_frame.width() - 5)
+        height = max(70, int(width * 9 / 16) + 5)
+        if self.thumbnail_frame.height() != height:
+            self.thumbnail_frame.setFixedHeight(height)
+        QTimer.singleShot(0, self.update_thumbnail_pixmap)
+
+    def update_thumbnail_pixmap(self):
+        pixmap = self._thumbnail_pixmap
+        width, height = self.image.width(), self.image.height()
+        if pixmap is None or pixmap.isNull() or width < 1 or height < 1:
+            return
+        # Fill the same 16:9 viewport on every card, cropping equally at center.
+        scaled = pixmap.scaled(
+            width, height, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+        )
+        x = max(0, (scaled.width() - width) // 2)
+        y = max(0, (scaled.height() - height) // 2)
+        self.image.setPixmap(scaled.copy(QRect(x, y, width, height)))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and callable(self.on_activate):
@@ -414,9 +468,9 @@ class VideoCard(QFrame):
     def set_thumbnail(self, pixmap):
         if pixmap.isNull():
             return
+        self._thumbnail_pixmap = QPixmap(pixmap)
         self.image.setText("")
-        self.image.setPixmap(pixmap.scaled(max(1, self.image.width()),
-            max(1, self.image.height()), Qt.KeepAspectRatio, Qt.FastTransformation))
+        self.update_thumbnail_pixmap()
 
 
 class MainWindow(QMainWindow):
@@ -483,6 +537,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet("""
             QMainWindow, QWidget { background:#101318; color:#f4f6f8; font-family:Sans; }
             QLabel#brand { color:#ffffff; font-size:17px; font-weight:750; }
+            QLabel#brandHeader { color:#ffffff; font-size:20px; font-weight:800; }
             QLabel#hint { color:#aeb8c5; font-size:11px; }
             QLineEdit,QComboBox { background:#202733; color:white; border:2px solid #465366;
                 border-radius:7px; padding:5px 7px; font-size:13px; min-height:23px; }
@@ -548,10 +603,11 @@ class MainWindow(QMainWindow):
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(5)
         logo = QLabel()
-        logo.setPixmap(youtube_logo_icon(22).pixmap(22, 22))
+        logo.setFixedSize(28, 28)
+        logo.setPixmap(youtube_logo_icon(28).pixmap(28, 28))
         brand = QLabel("RoxyTube")
-        brand.setObjectName("brand")
-        brand.setMaximumWidth(92)
+        brand.setObjectName("brandHeader")
+        brand.setMaximumWidth(112)
         header.addWidget(logo)
         header.addWidget(brand)
 
@@ -691,6 +747,9 @@ class MainWindow(QMainWindow):
         self.cards_grid = QGridLayout(self.cards_host)
         self.cards_grid.setContentsMargins(2, 2, 2, 2)
         self.cards_grid.setSpacing(8)
+        # Equal column stretch keeps left and right cards exactly the same width.
+        self.cards_grid.setColumnStretch(0, 1)
+        self.cards_grid.setColumnStretch(1, 1)
         self.scroll.setWidget(self.cards_host)
         self.root_layout.addWidget(self.scroll, 1)
 
@@ -794,6 +853,16 @@ class MainWindow(QMainWindow):
         self.player_meta.setObjectName("hint")
         self.player_meta.setWordWrap(False)
         self.player_meta.setStyleSheet(
+            "color:#b9c5d3;font-size:12px;font-weight:700;padding:2px 4px;border:0;")
+        self.player_views_label = QLabel("")
+        self.player_views_label.setObjectName("hint")
+        self.player_views_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.player_views_label.setStyleSheet(
+            "color:#b9c5d3;font-size:11px;padding:2px 4px;border:0;")
+        self.player_duration_label = QLabel("")
+        self.player_duration_label.setObjectName("hint")
+        self.player_duration_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.player_duration_label.setStyleSheet(
             "color:#b9c5d3;font-size:11px;padding:2px 4px;border:0;")
         self.resolution_label = QLabel("")
         self.resolution_label.setObjectName("hint")
@@ -801,6 +870,8 @@ class MainWindow(QMainWindow):
         self.resolution_label.setStyleSheet(
             "color:#b9c5d3;font-size:11px;padding:2px 4px;border:0;")
         meta_row.addWidget(self.player_meta, 1)
+        meta_row.addWidget(self.player_views_label, 0)
+        meta_row.addWidget(self.player_duration_label, 0)
         meta_row.addWidget(self.resolution_label, 0)
         body.addLayout(meta_row)
         self.side_panel = QFrame()
@@ -977,6 +1048,8 @@ class MainWindow(QMainWindow):
             return
         # Recommended/Home uses the same two-column grid as Search.
         columns = 2
+        self.cards_grid.setColumnStretch(0, 1)
+        self.cards_grid.setColumnStretch(1, 1)
         for i, card in enumerate(self.cards):
             self.cards_grid.removeWidget(card)
             self.cards_grid.addWidget(card, i // columns, i % columns)
@@ -1161,6 +1234,7 @@ class MainWindow(QMainWindow):
                 self.results.append({
                     "url": url, "title": entry.get("title") or "Video tanpa judul",
                     "channel": entry.get("channel") or entry.get("uploader") or "YouTube",
+                    "view_count": format_view_count(entry.get("view_count")),
                     "thumbnail": thumbnail_url(entry), "duration": duration_text,
                     "duration_seconds": float(duration or 0),
                     "description": entry.get("description") or "",
@@ -1195,7 +1269,8 @@ class MainWindow(QMainWindow):
         columns = 2
         for idx in range(start, end):
             result = self.results[idx]
-            card = VideoCard(idx, result["title"], result["channel"], result["duration"], self.cards_host)
+            card = VideoCard(idx, result["title"], result["channel"], result["duration"],
+                             result.get("view_count", ""), self.cards_host)
             card.setMinimumHeight(250)
             card.on_activate = self.play_index
             card.installEventFilter(self)
@@ -1250,6 +1325,18 @@ class MainWindow(QMainWindow):
             self.current_page = target
             self.render_page()
 
+            # Keep remote focus in the pagination row after rebuilding cards.
+            # Next becomes disabled on the final page, so anchor focus on Prev.
+            focus_target = self.next_page_button if delta > 0 else self.prev_page_button
+            if not focus_target.isEnabled():
+                focus_target = self.prev_page_button if self.prev_page_button.isEnabled() else self.next_page_button
+            QTimer.singleShot(
+                0,
+                lambda button=focus_target: (
+                    button.setFocus(Qt.OtherFocusReason) if button.isEnabled() else None
+                )
+            )
+
     @staticmethod
     def process_is_running(process):
         """Return process state safely even if Qt has already deleted its C++ object."""
@@ -1302,6 +1389,8 @@ class MainWindow(QMainWindow):
         duration = video.get("duration") or ""
         self.current_channel = channel
         self.current_duration_label = duration
+        self.player_views_label.setText(video.get("view_count") or "")
+        self.player_views_label.setVisible(bool(video.get("view_count")))
         self.stream_width = self.stream_height = 0
         self.update_stream_resolution()
         self.loading_bar.show()
@@ -1614,6 +1703,11 @@ class MainWindow(QMainWindow):
             self.duration_seconds = max(0.0, float(data["duration"]))
             self.playback_queue[index]["duration_seconds"] = self.duration_seconds
             self.update_timeline(self.current_time_pos, self.duration_seconds)
+        view_count = format_view_count(data.get("view_count"))
+        if view_count:
+            self.playback_queue[index]["view_count"] = view_count
+            self.player_views_label.setText(view_count)
+            self.player_views_label.setVisible(not self.is_playback_fullscreen)
         description = data.get("description") or self.playback_queue[index].get("description") or "Deskripsi tidak tersedia."
         self.playback_queue[index]["description"] = description
         self.show_side_panel("description", description)
@@ -1929,6 +2023,8 @@ class MainWindow(QMainWindow):
         self.showFullScreen()
         self.player_header_widget.hide()
         self.player_meta.hide()
+        self.player_views_label.hide()
+        self.player_duration_label.hide()
         self.resolution_label.hide()
         self.side_panel.hide()
         self.player_status.hide()
@@ -1958,6 +2054,8 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, lambda: self.setGeometry(geometry))
         self.player_header_widget.show()
         self.player_meta.show()
+        self.player_views_label.setVisible(bool(self.player_views_label.text()))
+        self.player_duration_label.setVisible(bool(self.player_duration_label.text()))
         self.resolution_label.show()
         self.side_panel.show()
         self.player_status.show()
@@ -2037,10 +2135,8 @@ class MainWindow(QMainWindow):
         self.mini_title_offset = (start + 1) % len(cycle)
 
     def update_stream_resolution(self):
-        details = [self.current_channel or "YouTube"]
-        if self.current_duration_label:
-            details.append(self.current_duration_label)
-        self.player_meta.setText("  •  ".join(details))
+        self.player_meta.setText(self.current_channel or "YouTube")
+        self.player_duration_label.setText(self.current_duration_label or "")
         self.resolution_label.setText(
             f"{self.stream_width}×{self.stream_height} ({self.stream_height}p)"
             if self.stream_width > 0 and self.stream_height > 0 else ""
@@ -2392,6 +2488,9 @@ class MainWindow(QMainWindow):
                             return True
                         if self.next_page_button.isEnabled():
                             self.next_page_button.setFocus()
+                        elif self.prev_page_button.isEnabled():
+                            # On the final page, Down from the bottom row returns to Prev.
+                            self.prev_page_button.setFocus(Qt.OtherFocusReason)
                         return True
                     if key == Qt.Key_Up and idx >= cols:
                         self.cards[idx - cols].setFocus(); return True
@@ -2401,10 +2500,12 @@ class MainWindow(QMainWindow):
                             step = max(bar.singleStep(), 72)
                             bar.setValue(max(bar.minimum(), bar.value() - step))
                             return True
-                        self.keyboard_button.setFocus()
+                        self.keyboard_button.setFocus(Qt.OtherFocusReason)
                         return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
-                        self.play_index(idx); return True
+                        # Use the card's absolute results index, not its position
+                        # inside the current page's self.cards list.
+                        self.play_index(focus.index); return True
                 if focus is self.query and key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                     self.set_keyboard_visible(True)
                     if self.keyboard.buttons:
@@ -2473,7 +2574,8 @@ class MainWindow(QMainWindow):
                         return True
                     if key == Qt.Key_Up:
                         if self.cards:
-                            self.cards[-1].setFocus()
+                            # Return to the first thumbnail at the top-left.
+                            self.cards[0].setFocus(Qt.OtherFocusReason)
                         return True
                     if key == Qt.Key_Down:
                         return True
