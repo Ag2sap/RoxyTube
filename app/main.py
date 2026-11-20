@@ -375,8 +375,9 @@ class VideoCard(QFrame):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setStyleSheet("""
-            QFrame#videoCard { background:#1a202a; border:2px solid #303b4a; border-radius:9px; }
-            QFrame#videoCard:focus { border:3px solid #ffd166; background:#29384b; }
+            QFrame#videoCard { background:transparent; border:0; }
+            QFrame#videoCard:focus { background:transparent; border:0; }
+            QFrame#videoCard:focus QLabel#videoTitle { color:#ffd166; }
         """)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(7, 7, 7, 7)
@@ -387,7 +388,7 @@ class VideoCard(QFrame):
         self.thumbnail_frame.setObjectName("thumbnailFrame")
         self.thumbnail_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.thumbnail_frame.setStyleSheet(
-            "QFrame#thumbnailFrame { background:#252e3b; border:0; border-radius:5px; }")
+            "QFrame#thumbnailFrame { background:transparent; border:0; border-radius:0; }")
         thumb_layout = QGridLayout(self.thumbnail_frame)
         thumb_layout.setContentsMargins(0, 0, 5, 5)
         self.image = QLabel(" ")
@@ -399,13 +400,14 @@ class VideoCard(QFrame):
         self.duration_label = QLabel(duration or "")
         self.duration_label.setAlignment(Qt.AlignCenter)
         self.duration_label.setStyleSheet(
-            "QLabel { background:rgba(0,0,0,220); color:white; border-radius:3px;"
+            "QLabel { background:transparent; color:white; border:0;"
             " padding:2px 5px; font-size:10px; font-weight:700; }")
         self.duration_label.setVisible(bool(duration))
         thumb_layout.addWidget(self.duration_label, 0, 0, Qt.AlignRight | Qt.AlignBottom)
         layout.addWidget(self.thumbnail_frame)
 
         self.title_label = QLabel(title)
+        self.title_label.setObjectName("videoTitle")
         self.title_label.setWordWrap(True)
         self.title_label.setMaximumHeight(38)
         self.title_label.setStyleSheet("font-size:13px;font-weight:700;color:#f4f6f8;border:0;")
