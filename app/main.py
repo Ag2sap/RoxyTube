@@ -4,7 +4,7 @@ from __future__ import annotations
 import json, os, shutil, sys
 from pathlib import Path
 from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve, QSize
-from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QIcon
+from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QIcon, QPainterPath
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDiskCache, QLocalSocket, QLocalServer
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
@@ -73,6 +73,50 @@ def monochrome_icon(icon, size, color="#000000"):
     return QIcon(pixmap)
 
 
+def interface_icon(kind, size=20, color="#ffffff"):
+    width, height = (size.width(), size.height()) if isinstance(size, QSize) else (int(size), int(size))
+    pixmap = QPixmap(width, height)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setPen(QPen(QColor(color), 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    painter.setBrush(Qt.NoBrush)
+    if kind == "search":
+        painter.drawEllipse(2, 2, width - 8, height - 8)
+        painter.drawLine(width - 8, height - 8, width - 2, height - 2)
+    elif kind == "keyboard":
+        painter.drawRoundedRect(1, 3, width - 2, height - 6, 2, 2)
+        for row in range(2):
+            for col in range(5):
+                x = 4 + col * max(2, (width - 9) // 5)
+                y = 7 + row * 4
+                painter.drawLine(x, y, x + 1, y)
+        painter.drawLine(width // 3, height - 6, (width * 2) // 3, height - 6)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def youtube_logo_icon(size=20):
+    """Draw the red YouTube play mark without relying on a platform theme icon."""
+    width = height = int(size)
+    pixmap = QPixmap(width, height)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor("#ff0033"))
+    painter.drawRoundedRect(1, 3, width - 2, height - 6, 4, 4)
+    triangle = QPainterPath()
+    triangle.moveTo(width * 0.42, height * 0.28)
+    triangle.lineTo(width * 0.42, height * 0.72)
+    triangle.lineTo(width * 0.73, height * 0.50)
+    triangle.closeSubpath()
+    painter.setBrush(QColor("#ffffff"))
+    painter.drawPath(triangle)
+    painter.end()
+    return QIcon(pixmap)
+
+
 def video_url(entry):
     candidate, video_id = entry.get("webpage_url") or entry.get("url"), entry.get("id")
     if candidate and candidate.startswith(("http://", "https://")):
@@ -134,21 +178,6 @@ class TvKeyboard(QWidget):
         self.buttons = []
         self.key_items = []
 
-        utility = QHBoxLayout()
-        utility.addStretch(1)
-        clear_button = QPushButton("KOSONGKAN")
-        clear_button.setFocusPolicy(Qt.StrongFocus)
-        clear_button.setProperty("keyRole", "special")
-        clear_button.clicked.connect(self.clear_text)
-        clear_button.installEventFilter(self)
-        utility.addWidget(clear_button)
-        self.box.addLayout(utility)
-        self.buttons.append(clear_button)
-        self.key_items.append({
-            "button": clear_button, "row": -1, "col": 8,
-            "span": 2, "center": 9.0,
-        })
-
         grid = QGridLayout()
         grid.setSpacing(4)
         for col in range(self.ROW_UNITS):
@@ -171,8 +200,25 @@ class TvKeyboard(QWidget):
             })
             return button
 
+        if self.symbol_mode:
+            utility = QHBoxLayout()
+            utility.addStretch(1)
+            clear_button = QPushButton("KOSONGKAN")
+            clear_button.setFocusPolicy(Qt.StrongFocus)
+            clear_button.setProperty("keyRole", "special")
+            clear_button.clicked.connect(self.clear_text)
+            clear_button.installEventFilter(self)
+            utility.addWidget(clear_button)
+            self.box.addLayout(utility)
+            self.buttons.append(clear_button)
+            self.key_items.append({
+                "button": clear_button, "row": -1, "col": 8,
+                "span": 2, "center": 9.0,
+            })
+
         if not self.symbol_mode:
-            rows = ("1234567890", "qwertyuiop", "asdfghjkl@", "zxcvbnm-_.")
+            rows = ("1234567890", "qwertyuiop", "asdfghjkl.", "zxcvbnm")
+            add_key("KOSONGKAN", 3, 7, 3, callback=self.clear_text)
         else:
             rows = ("1234567890", "!@#$%^&*()", "-_=+[]{};:", "'\",./?\\|~^")
 
@@ -186,9 +232,9 @@ class TvKeyboard(QWidget):
 
         if not self.symbol_mode:
             special = [
-                ("SHIFT", 2, self.toggle_shift, self.shift_once),
                 ("?123", 1, self.toggle_symbols, False),
                 ("CAPS" if not self.caps_locked else "CAPS ON", 1, self.toggle_caps, self.caps_locked),
+                ("SHIFT", 2, self.toggle_shift, self.shift_once),
                 ("SPASI", 3, lambda: self.insert(" "), False),
                 ("DEL", 1, self.backspace, False),
                 ("SELESAI", 2, self.finish, False),
@@ -223,6 +269,21 @@ class TvKeyboard(QWidget):
             key = event.key()
             item = next((x for x in self.key_items if x["button"] is watched), None)
             if item:
+                if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
+                    watched.click()
+                    event.accept()
+                    return True
+                if key == Qt.Key_Space:
+                    event.accept()
+                    return True
+                if key == Qt.Key_Up and item["row"] == 0:
+                    self.target.setFocus()
+                    event.accept()
+                    return True
+                if key == Qt.Key_Down and item["row"] == 4:
+                    self.target.setFocus()
+                    event.accept()
+                    return True
                 if key in (Qt.Key_Left, Qt.Key_Right):
                     row_items = sorted(
                         (x for x in self.key_items if x["row"] == item["row"]),
@@ -232,8 +293,8 @@ class TvKeyboard(QWidget):
                     next_index = index + (1 if key == Qt.Key_Right else -1)
                     if 0 <= next_index < len(row_items):
                         row_items[next_index]["button"].setFocus()
-                        event.accept()
-                        return True
+                    event.accept()
+                    return True
                 elif key in (Qt.Key_Up, Qt.Key_Down):
                     next_row = item["row"] + (-1 if key == Qt.Key_Up else 1)
                     if next_row < -1:
@@ -374,6 +435,7 @@ class MainWindow(QMainWindow):
         self.current_page = 0
         self.page_size = self.settings_data["page_size"]
         self._activation_state = "normal"
+        self._restore_geometry = None
         self._playback_return_state = "normal"
         self.thumbnail_queue = []
         self.thumbnail_active = 0
@@ -416,7 +478,7 @@ class MainWindow(QMainWindow):
         self.mini_title_text = ""
         self.mini_title_offset = 0
         self.mini_title_timer = QTimer(self)
-        self.mini_title_timer.setInterval(280)
+        self.mini_title_timer.setInterval(180)
         self.mini_title_timer.timeout.connect(self.advance_mini_title)
         self.setStyleSheet("""
             QMainWindow, QWidget { background:#101318; color:#f4f6f8; font-family:Sans; }
@@ -486,7 +548,7 @@ class MainWindow(QMainWindow):
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(5)
         logo = QLabel()
-        logo.setPixmap(self.style().standardIcon(QStyle.SP_MediaPlay).pixmap(20, 20))
+        logo.setPixmap(youtube_logo_icon(22).pixmap(22, 22))
         brand = QLabel("RoxyTube")
         brand.setObjectName("brand")
         brand.setMaximumWidth(92)
@@ -494,7 +556,7 @@ class MainWindow(QMainWindow):
         header.addWidget(brand)
 
         self.mini_player = QFrame()
-        self.mini_player.setFixedWidth(248)
+        self.mini_player.setFixedWidth(216)
         self.mini_player.setStyleSheet(
             "QFrame{background:#171e28;border:1px solid #65758b;border-radius:6px;}"
         )
@@ -546,54 +608,61 @@ class MainWindow(QMainWindow):
             mini_controls.addWidget(widget)
         self.mini_time_label = QLabel("0:00/0:00")
         self.mini_time_label.setObjectName("hint")
-        self.mini_time_label.setMinimumWidth(62)
+        self.mini_time_label.setMinimumWidth(64)
+        self.mini_time_label.setMaximumWidth(78)
         self.mini_time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         mini_controls.addWidget(self.mini_time_label)
         mini_layout.addLayout(mini_controls)
         header.addStretch(1)
-        header.addWidget(self.mini_player)
-        header.addSpacing(62)
+        header.addWidget(self.mini_player, 0, Qt.AlignRight)
+        header.addSpacing(8)
         self.mini_player.hide()
 
-        # Pin controls to the actual Home window corner, independent of sidebar width.
-        self.window_controls_widget = QWidget(self.search_page)
-        self.window_controls_widget.setFixedSize(57, 26)
+        # Keep window controls in the header so the whole group aligns with Search.
+        self.window_controls_widget = QWidget(content)
+        self.window_controls_widget.setFixedSize(77, 34)
         window_controls = QHBoxLayout(self.window_controls_widget)
         window_controls.setContentsMargins(0, 0, 0, 0)
         window_controls.setSpacing(1)
         self.minimize_button = QPushButton()
         self.minimize_button.setIcon(monochrome_icon(
-            self.style().standardIcon(QStyle.SP_TitleBarMinButton), QSize(15, 15)))
-        self.minimize_button.setFixedSize(27, 25)
+            self.style().standardIcon(QStyle.SP_TitleBarMinButton), QSize(20, 20), "#ffffff"))
+        self.minimize_button.setFixedSize(38, 34)
         self.minimize_button.setToolTip("Minimize aplikasi")
         self.minimize_button.clicked.connect(self.minimize_window)
         self.close_button = QPushButton()
         self.close_button.setIcon(monochrome_icon(
-            self.style().standardIcon(QStyle.SP_TitleBarCloseButton), QSize(15, 15)))
-        self.close_button.setFixedSize(27, 25)
+            self.style().standardIcon(QStyle.SP_TitleBarCloseButton), QSize(20, 20), "#ffffff"))
+        self.close_button.setFixedSize(38, 34)
         self.close_button.setToolTip("Tutup aplikasi dan hentikan playback")
         self.close_button.clicked.connect(self.close)
         for widget in (self.minimize_button, self.close_button):
-            widget.setIconSize(QSize(15, 15))
+            widget.setIconSize(QSize(20, 20))
             widget.setStyleSheet(
                 "QPushButton{padding:0;border:0;background:transparent;border-radius:4px;}"
                 "QPushButton:focus{background:#3a4b60;border:2px solid #ffd166;}"
             )
         window_controls.addWidget(self.minimize_button)
         window_controls.addWidget(self.close_button)
-        self.position_window_controls()
+        header.addWidget(self.window_controls_widget, 0, Qt.AlignRight)
         self.root_layout.addLayout(header)
 
         search_row = QHBoxLayout()
         self.query = QLineEdit()
-        self.query.setFocusPolicy(Qt.ClickFocus)
+        self.query.setFocusPolicy(Qt.StrongFocus)
         self.query.setPlaceholderText("Cari video atau tempel URL YouTube…")
         self.query.returnPressed.connect(self.search)
-        self.keyboard_button = QPushButton("KEY")
+        self.keyboard_button = QPushButton()
+        self.keyboard_button.setIcon(interface_icon("keyboard", QSize(20, 18)))
+        self.keyboard_button.setIconSize(QSize(20, 18))
+        self.keyboard_button.setFixedSize(38, 34)
         self.keyboard_button.setFocusPolicy(Qt.StrongFocus)
         self.keyboard_button.setToolTip("Buka keyboard layar")
         self.keyboard_button.clicked.connect(self.toggle_keyboard)
-        self.search_button = QPushButton("Search")
+        self.search_button = QPushButton()
+        self.search_button.setIcon(interface_icon("search", QSize(20, 20)))
+        self.search_button.setIconSize(QSize(20, 20))
+        self.search_button.setFixedSize(38, 34)
         self.search_button.setFocusPolicy(Qt.StrongFocus)
         self.search_button.setToolTip("Cari video")
         self.search_button.clicked.connect(self.search)
@@ -616,6 +685,8 @@ class MainWindow(QMainWindow):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll.setFocusPolicy(Qt.NoFocus)
+        self.scroll.verticalScrollBar().setFocusPolicy(Qt.NoFocus)
         self.cards_host = QWidget()
         self.cards_grid = QGridLayout(self.cards_host)
         self.cards_grid.setContentsMargins(2, 2, 2, 2)
@@ -689,6 +760,14 @@ class MainWindow(QMainWindow):
         # A vertical flow is better suited to the device's 4:3 PAL display.
         body = QVBoxLayout()
         body.setSpacing(5)
+        self.video_frame = QFrame()
+        self.video_frame.setObjectName("videoFrame")
+        self.video_frame.setStyleSheet(
+            "QFrame#videoFrame{background:#000000;border:1px solid #384354;}"
+        )
+        video_frame_layout = QVBoxLayout(self.video_frame)
+        video_frame_layout.setContentsMargins(0, 0, 0, 0)
+        video_frame_layout.setSpacing(0)
         self.video_surface = QWidget()
         # MPV --wid must target a real child X11 window owned by this Qt page.
         self.video_surface.setAttribute(Qt.WA_NativeWindow, True)
@@ -698,8 +777,18 @@ class MainWindow(QMainWindow):
         self.video_surface.setMouseTracking(True)
         self.video_surface.setMinimumSize(300, 170)
         self.video_surface.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.video_surface.setStyleSheet("background:#000000;border:1px solid #384354;")
-        body.addWidget(self.video_surface, 5)
+        self.video_surface.setStyleSheet("background:#000000;border:0;")
+        video_frame_layout.addWidget(self.video_surface, 1)
+        self.loading_bar = QProgressBar()
+        self.loading_bar.setRange(0, 0)
+        self.loading_bar.setTextVisible(False)
+        self.loading_bar.setFixedHeight(5)
+        self.loading_bar.setStyleSheet(
+            "QProgressBar{border:0;background:#273241;border-radius:2px;}"
+            "QProgressBar::chunk{background:#ff334f;border-radius:2px;}")
+        self.loading_bar.hide()
+        video_frame_layout.addWidget(self.loading_bar)
+        body.addWidget(self.video_frame, 5)
         meta_row = QHBoxLayout()
         self.player_meta = QLabel("")
         self.player_meta.setObjectName("hint")
@@ -725,7 +814,7 @@ class MainWindow(QMainWindow):
         side_buttons = QHBoxLayout()
         self.playlist_button = QPushButton("Queue")
         self.playlist_button.setToolTip("Antrean video")
-        self.playlist_button.clicked.connect(lambda: self.show_side_panel("playlist"))
+        self.playlist_button.clicked.connect(self.open_playlist_panel)
         self.description_button = QPushButton("Description")
         self.description_button.setToolTip("Deskripsi video")
         self.description_button.clicked.connect(lambda: self.show_side_panel("description"))
@@ -734,8 +823,10 @@ class MainWindow(QMainWindow):
         side_layout.addLayout(side_buttons)
         self.side_content = QScrollArea()
         self.side_content.setWidgetResizable(True)
-        self.side_content.setFocusPolicy(Qt.StrongFocus)
+        self.side_content.setMinimumWidth(0)
+        self.side_content.setFocusPolicy(Qt.NoFocus)
         self.side_content.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.side_content.verticalScrollBar().setFocusPolicy(Qt.NoFocus)
         self.side_text_host = QWidget()
         self.side_text_layout = QVBoxLayout(self.side_text_host)
         self.side_text_layout.setContentsMargins(2, 2, 2, 2)
@@ -838,6 +929,7 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.fast_forward_button)
         controls.addWidget(self.next_video_button)
         controls.addWidget(self.stop_button)
+        controls.addWidget(self.fullscreen_button)
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(self.settings_data["volume"])
@@ -851,19 +943,9 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.quality)
         controls.addWidget(QLabel("CC"))
         controls.addWidget(self.subtitle_box)
-        controls.addWidget(self.fullscreen_button)
         body.addWidget(self.controls_widget)
         body.addWidget(self.side_panel, 2)
         player_layout.addLayout(body, 1)
-        self.loading_bar = QProgressBar()
-        self.loading_bar.setRange(0, 0)
-        self.loading_bar.setTextVisible(False)
-        self.loading_bar.setFixedHeight(5)
-        self.loading_bar.setStyleSheet(
-            "QProgressBar{border:0;background:#273241;border-radius:2px;}"
-            "QProgressBar::chunk{background:#ff334f;border-radius:2px;}")
-        self.loading_bar.hide()
-        player_layout.addWidget(self.loading_bar)
         self.player_status = QLabel("Menyiapkan pemutar…")
         self.player_status.setObjectName("hint")
         player_layout.addWidget(self.player_status)
@@ -871,7 +953,6 @@ class MainWindow(QMainWindow):
         self.set_playback_controls_enabled(False)
 
         self.apply_safe_area()
-        self.position_window_controls()
         self.nav_buttons[0].setFocus()
         QApplication.instance().installEventFilter(self)
         self.show_side_panel("playlist")
@@ -888,17 +969,8 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         self.apply_safe_area()
         self.refresh_card_columns()
-        self.position_window_controls()
         if self.mini_player.isVisible():
             QTimer.singleShot(0, self.advance_mini_title)
-
-    def position_window_controls(self):
-        if not hasattr(self, "window_controls_widget"):
-            return
-        self.window_controls_widget.move(
-            max(0, self.search_page.width() - self.window_controls_widget.width() - 5), 3
-        )
-        self.window_controls_widget.raise_()
 
     def refresh_card_columns(self):
         if not hasattr(self, "scroll"):
@@ -914,7 +986,9 @@ class MainWindow(QMainWindow):
         if visible == self.keyboard_open:
             return
         self.keyboard_open = visible
-        self.keyboard_button.setText("KEY CLOSE" if visible else "KEY")
+        self.keyboard_button.setToolTip(
+            "Tutup keyboard layar" if visible else "Buka keyboard layar"
+        )
         if self.keyboard_animation is not None:
             self.keyboard_animation.stop()
         self.keyboard.setVisible(True)
@@ -930,7 +1004,7 @@ class MainWindow(QMainWindow):
 
     def finish_keyboard(self):
         self.set_keyboard_visible(False)
-        self.query.setFocus()
+        self.search()
 
     def toggle_keyboard(self):
         self.set_keyboard_visible(not self.keyboard_open)
@@ -1242,13 +1316,14 @@ class MainWindow(QMainWindow):
             self.pages.setCurrentWidget(self.search_page)
             self.mini_player.show()
             self.window_controls_widget.show()
+            QTimer.singleShot(0, self.start_mini_title_scroll)
         else:
             self.pages.setCurrentWidget(self.player_page)
             self.mini_player.hide()
             self.window_controls_widget.hide()
         self.video_surface.winId()
-        # Keep keyboard focus in Roxy when MPV is embedded in the native surface.
-        self.play_pause_button.setFocus(Qt.OtherFocusReason)
+        # Keep focus on the Qt page until MPV starts and enables its controls.
+        self.player_page.setFocus(Qt.OtherFocusReason)
         self._launch_player()
 
     def _launch_player(self):
@@ -1315,6 +1390,9 @@ class MainWindow(QMainWindow):
             self.player_status.setText("Mengambil stream video…")
             self.set_playback_controls_enabled(True)
             self.set_mini_controls_enabled(True)
+            if self.pages.currentWidget() == self.player_page and not self.is_playback_fullscreen:
+                QTimer.singleShot(0, lambda: self.play_pause_button.setFocus(Qt.OtherFocusReason)
+                                  if self.process_is_running(self.player_process) else None)
             self.mpv_event_attempts = 0
             QTimer.singleShot(250, lambda i=self.current_index, p=process:
                               self.connect_mpv_events(i, p))
@@ -1739,6 +1817,13 @@ class MainWindow(QMainWindow):
         socket.deleteLater()
         return True
 
+    def open_playlist_panel(self):
+        self.show_side_panel("playlist")
+        if self.playlist_items:
+            self.playlist_items[0].setFocus(Qt.OtherFocusReason)
+        else:
+            self.playlist_button.setFocus(Qt.OtherFocusReason)
+
     def populate_playlist(self):
         self.clear_side_content()
         self.playlist_items = []
@@ -1746,6 +1831,10 @@ class MainWindow(QMainWindow):
             button = QPushButton((">  " if idx == self.current_index else "") + item["title"])
             button.setToolTip(item["title"])
             button.setFocusPolicy(Qt.StrongFocus)
+            # Long video titles must not force the scroll-area child wider than
+            # its viewport; otherwise the left edge of Queue appears clipped.
+            button.setMinimumWidth(0)
+            button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
             button.setStyleSheet("text-align:left;padding:6px;font-size:11px;")
             button.clicked.connect(
                 lambda checked=False, i=idx: self.play_index(i, queue=self.playback_queue)
@@ -1762,7 +1851,9 @@ class MainWindow(QMainWindow):
             label = QLabel(text or "Memuat deskripsi…")
             label.setWordWrap(True)
             label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            label.setFocusPolicy(Qt.StrongFocus)
             label.setStyleSheet("font-size:11px;color:#e4e9ef;border:0;")
+            self.description_label = label
             self.side_text_layout.addWidget(label)
         else:
             self.populate_playlist()
@@ -1771,6 +1862,7 @@ class MainWindow(QMainWindow):
 
     def clear_side_content(self):
         self.playlist_items = []
+        self.description_label = None
         while self.side_text_layout.count():
             item = self.side_text_layout.takeAt(0)
             if item.widget():
@@ -1809,6 +1901,8 @@ class MainWindow(QMainWindow):
         if not self.background_playback:
             self.fallback_qualities.clear()
         self.mini_player.setVisible(self.background_playback)
+        if self.background_playback:
+            QTimer.singleShot(0, self.start_mini_title_scroll)
         self.window_controls_widget.show()
         self.set_playback_controls_enabled(False)
         self.slider_dragging = False
@@ -1822,7 +1916,15 @@ class MainWindow(QMainWindow):
         if self.is_playback_fullscreen:
             self.exit_playback_fullscreen()
             return
-        self._playback_return_state = "maximized" if self.isMaximized() else "normal"
+        if self.isFullScreen():
+            self._playback_return_state = "fullscreen"
+        elif self.isMaximized():
+            self._playback_return_state = "maximized"
+        else:
+            self._playback_return_state = "normal"
+        # Preserve the windowed geometry before Qt replaces it with fullscreen geometry.
+        # Capture the actual pre-fullscreen rectangle; normalGeometry() may be stale.
+        self._restore_geometry = self.geometry()
         self.is_playback_fullscreen = True
         self.showFullScreen()
         self.player_header_widget.hide()
@@ -1842,10 +1944,18 @@ class MainWindow(QMainWindow):
         self.fullscreen_hide_timer.stop()
         self.is_playback_fullscreen = False
         self.fullscreen_controls_visible = True
-        if self._playback_return_state == "maximized":
+        if self._playback_return_state == "fullscreen":
+            self.setWindowState(Qt.WindowFullScreen)
+            self.showFullScreen()
+        elif self._playback_return_state == "maximized":
+            self.setWindowState(Qt.WindowMaximized)
             self.showMaximized()
         else:
-            self.showNormal()
+            self.setWindowState(Qt.WindowNoState)
+            self.show()
+            if self._restore_geometry is not None and self._restore_geometry.isValid():
+                geometry = self._restore_geometry
+                QTimer.singleShot(0, lambda: self.setGeometry(geometry))
         self.player_header_widget.show()
         self.player_meta.show()
         self.resolution_label.show()
@@ -1866,7 +1976,9 @@ class MainWindow(QMainWindow):
         self.fullscreen_controls_visible = True
         if focus_slider:
             self.seek_slider.setFocus(Qt.OtherFocusReason)
-        self.fullscreen_hide_timer.start(1000)
+            self.fullscreen_hide_timer.stop()
+        else:
+            self.fullscreen_hide_timer.start(1000)
 
     def hide_fullscreen_controls(self):
         if not self.is_playback_fullscreen:
@@ -1883,7 +1995,18 @@ class MainWindow(QMainWindow):
         self.advance_mini_title()
         available = max(1, self.mini_title_button.contentsRect().width() - 6)
         if self.mini_title_button.fontMetrics().horizontalAdvance(self.mini_title_text) > available:
+            QTimer.singleShot(0, self.start_mini_title_scroll)
+        else:
+            self.mini_title_timer.stop()
+            self.mini_title_button.setText(self.mini_title_text)
+
+    def start_mini_title_scroll(self):
+        if not self.mini_player.isVisible() or not self.mini_title_text:
+            return
+        available = max(1, self.mini_title_button.contentsRect().width() - 6)
+        if self.mini_title_button.fontMetrics().horizontalAdvance(self.mini_title_text) > available:
             self.mini_title_timer.start()
+            self.advance_mini_title()
         else:
             self.mini_title_timer.stop()
             self.mini_title_button.setText(self.mini_title_text)
@@ -1899,15 +2022,18 @@ class MainWindow(QMainWindow):
             self.mini_title_timer.stop()
             return
         cycle = text + "   "
+        # Duplicate the cycle so the visible slice can cross the end without
+        # shrinking or jumping back to the beginning.
+        loop_text = cycle + cycle
         start = self.mini_title_offset
         end = start
         while end < start + len(cycle):
-            if metrics.horizontalAdvance(cycle[start:end + 1]) > available:
+            if metrics.horizontalAdvance(loop_text[start:end + 1]) > available:
                 break
             end += 1
         if end == start:
             end += 1
-        self.mini_title_button.setText(cycle[start:end])
+        self.mini_title_button.setText(loop_text[start:end])
         self.mini_title_offset = (start + 1) % len(cycle)
 
     def update_stream_resolution(self):
@@ -1947,26 +2073,52 @@ class MainWindow(QMainWindow):
                     self.fullscreen_hide_timer.start(1000)
             except (AttributeError, RuntimeError, TypeError):
                 pass
-        if event.type() == QEvent.KeyPress and self.isActiveWindow():
+        if event.type() == QEvent.KeyPress:
             key, focus = event.key(), QApplication.focusWidget()
+            if key == Qt.Key_Space and isinstance(watched, QPushButton):
+                return True
+            if (self.pages.currentWidget() == self.player_page
+                    and key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select)
+                    and isinstance(focus, QPushButton)
+                    and (focus in (
+                        self.back_button, self.previous_video_button, self.rewind_button,
+                        self.play_pause_button, self.fast_forward_button,
+                        self.next_video_button, self.stop_button, self.fullscreen_button,
+                        self.playlist_button, self.description_button
+                    ) or focus in self.playlist_items)):
+                focus.click()
+                return True
             if self.is_playback_fullscreen:
                 if key in (Qt.Key_Escape, Qt.Key_Back):
                     self.exit_playback_fullscreen()
                     return True
                 if self.fullscreen_controls_visible:
-                    self.fullscreen_hide_timer.start(1000)
+                    fullscreen_focus_targets = (
+                        self.seek_slider, self.previous_video_button, self.rewind_button,
+                        self.play_pause_button, self.fast_forward_button, self.next_video_button,
+                        self.stop_button, self.fullscreen_button, self.volume_slider,
+                        self.quality, self.subtitle_box
+                    )
+                    if focus in fullscreen_focus_targets:
+                        # Keep controls available while the remote is navigating them.
+                        self.fullscreen_hide_timer.stop()
+                    elif focus is self.player_page:
+                        self.fullscreen_hide_timer.start(1000)
                     if key == Qt.Key_Down and focus is self.player_page:
                         self.seek_slider.setFocus(Qt.OtherFocusReason)
                         return True
                     if key == Qt.Key_Up and focus is self.seek_slider:
                         self.hide_fullscreen_controls()
                         return True
+                    if key == Qt.Key_Down and focus is self.seek_slider:
+                        self.previous_video_button.setFocus(Qt.OtherFocusReason)
+                        return True
                     if key == Qt.Key_Down and focus in (
                         self.previous_video_button, self.rewind_button, self.play_pause_button,
                         self.fast_forward_button, self.next_video_button, self.stop_button,
-                        self.quality, self.subtitle_box, self.fullscreen_button
+                        self.fullscreen_button, self.quality, self.subtitle_box
                     ):
-                        self.hide_fullscreen_controls()
+                        # The side panel is hidden in fullscreen; don't send focus to Queue.
                         return True
                 elif key == Qt.Key_Down:
                     self.show_fullscreen_controls(focus_slider=True)
@@ -1975,6 +2127,15 @@ class MainWindow(QMainWindow):
                     self.toggle_play_pause()
                     return True
             if self.pages.currentWidget() == self.player_page:
+                if focus is self.back_button:
+                    if key == Qt.Key_Down:
+                        self.play_pause_button.setFocus(Qt.OtherFocusReason); return True
+                    if key in (Qt.Key_Up, Qt.Key_Left, Qt.Key_Right):
+                        return True
+                if focus is self.player_page and key == Qt.Key_Down:
+                    self.seek_slider.setFocus(Qt.OtherFocusReason); return True
+                if focus is self.player_page and key in (Qt.Key_Up, Qt.Key_Left, Qt.Key_Right):
+                    return True
                 if key in (Qt.Key_Escape, Qt.Key_Back):
                     self.back_to_results()
                     return True
@@ -2004,22 +2165,27 @@ class MainWindow(QMainWindow):
                         return True
                 if focus in (self.previous_video_button, self.rewind_button,
                              self.play_pause_button, self.fast_forward_button,
-                             self.next_video_button, self.stop_button):
+                             self.next_video_button, self.stop_button, self.fullscreen_button):
                     row = [self.previous_video_button, self.rewind_button,
                            self.play_pause_button, self.fast_forward_button,
-                           self.next_video_button, self.stop_button, self.volume_slider]
+                           self.next_video_button, self.stop_button,
+                           self.fullscreen_button, self.volume_slider]
                     pos = row.index(focus)
-                    if key == Qt.Key_Left and pos > 0:
-                        row[pos - 1].setFocus(); return True
-                    if key == Qt.Key_Right and pos < len(row) - 1:
-                        row[pos + 1].setFocus(); return True
+                    if key == Qt.Key_Left:
+                        if pos > 0:
+                            row[pos - 1].setFocus()
+                        return True
+                    if key == Qt.Key_Right:
+                        if pos < len(row) - 1:
+                            row[pos + 1].setFocus()
+                        return True
                     if key == Qt.Key_Up:
                         self.seek_slider.setFocus(); return True
                     if key == Qt.Key_Down:
                         self.playlist_button.setFocus(); return True
                 if focus is self.quality:
                     if key == Qt.Key_Left:
-                        self.stop_button.setFocus(); return True
+                        self.fullscreen_button.setFocus(); return True
                     if key == Qt.Key_Right:
                         self.subtitle_box.setFocus(); return True
                     if key == Qt.Key_Up:
@@ -2030,14 +2196,12 @@ class MainWindow(QMainWindow):
                     if key == Qt.Key_Left:
                         self.quality.setFocus(); return True
                     if key == Qt.Key_Right:
-                        self.fullscreen_button.setFocus(); return True
+                        return True
                     if key == Qt.Key_Up:
                         self.seek_slider.setFocus(); return True
                     if key == Qt.Key_Down:
                         self.playlist_button.setFocus(); return True
                 if focus is self.fullscreen_button:
-                    if key == Qt.Key_Left:
-                        self.subtitle_box.setFocus(); return True
                     if key == Qt.Key_Up:
                         self.seek_slider.setFocus(); return True
                     if key == Qt.Key_Down:
@@ -2046,51 +2210,64 @@ class MainWindow(QMainWindow):
                     item_index = self.playlist_items.index(focus)
                     if key == Qt.Key_Up:
                         if item_index > 0:
-                            self.playlist_items[item_index - 1].setFocus()
+                            self.playlist_items[item_index - 1].setFocus(Qt.OtherFocusReason)
                         else:
-                            bar = self.side_content.verticalScrollBar()
-                            if bar.value() > bar.minimum():
-                                bar.setValue(max(bar.minimum(), bar.value() - max(bar.singleStep(), 48)))
-                            else:
-                                self.playlist_button.setFocus()
+                            self.playlist_button.setFocus(Qt.OtherFocusReason)
                         return True
                     if key == Qt.Key_Down:
                         if item_index + 1 < len(self.playlist_items):
-                            self.playlist_items[item_index + 1].setFocus()
-                        else:
-                            bar = self.side_content.verticalScrollBar()
-                            if bar.value() < bar.maximum():
-                                bar.setValue(min(bar.maximum(), bar.value() + max(bar.singleStep(), 48)))
-                            else:
-                                self.side_content.setFocus()
+                            self.playlist_items[item_index + 1].setFocus(Qt.OtherFocusReason)
                         return True
                     if key == Qt.Key_Left:
                         self.playlist_button.setFocus(); return True
                     if key == Qt.Key_Right:
                         self.description_button.setFocus(); return True
-                if focus in (self.side_content, self.side_content.viewport()):
-                    scroll_bar = self.side_content.verticalScrollBar()
+                if focus is getattr(self, "description_label", None) and focus is not None:
+                    bar = self.side_content.verticalScrollBar()
+                    step = max(bar.singleStep(), 48)
                     if key == Qt.Key_Up:
-                        if scroll_bar.value() <= scroll_bar.minimum():
-                            self.subtitle_box.setFocus(); return True
-                        scroll_bar.setValue(max(scroll_bar.minimum(),
-                                                scroll_bar.value() - scroll_bar.singleStep()))
+                        if bar.value() > bar.minimum():
+                            bar.setValue(max(bar.minimum(), bar.value() - step))
+                        else:
+                            self.description_button.setFocus(Qt.OtherFocusReason)
                         return True
                     if key == Qt.Key_Down:
-                        if scroll_bar.value() >= scroll_bar.maximum():
-                            self.description_button.setFocus(); return True
-                        scroll_bar.setValue(min(scroll_bar.maximum(),
-                                                scroll_bar.value() + scroll_bar.singleStep()))
+                        if bar.value() < bar.maximum():
+                            bar.setValue(min(bar.maximum(), bar.value() + step))
+                        else:
+                            self.description_button.setFocus(Qt.OtherFocusReason)
+                        return True
+                    if key == Qt.Key_Left:
+                        self.playlist_button.setFocus(Qt.OtherFocusReason)
+                        return True
+                    if key == Qt.Key_Right:
+                        self.description_button.setFocus(Qt.OtherFocusReason)
+                        return True
+                    if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
+                        return True
+                if focus in (self.side_content, self.side_content.viewport()):
+                    if key == Qt.Key_Down and self.playlist_items:
+                        self.playlist_items[0].setFocus(Qt.OtherFocusReason); return True
+                    if key == Qt.Key_Up:
+                        self.subtitle_box.setFocus(Qt.OtherFocusReason); return True
+                    if key in (Qt.Key_Up, Qt.Key_Down):
                         return True
                 if focus in (self.playlist_button, self.description_button):
                     if key == Qt.Key_Left:
-                        self.playlist_button.setFocus(); return True
+                        self.playlist_button.setFocus(Qt.OtherFocusReason); return True
                     if key == Qt.Key_Right:
-                        self.description_button.setFocus(); return True
+                        self.description_button.setFocus(Qt.OtherFocusReason); return True
                     if key == Qt.Key_Up:
-                        self.subtitle_box.setFocus(); return True
+                        self.subtitle_box.setFocus(Qt.OtherFocusReason); return True
                     if key == Qt.Key_Down:
-                        self.side_content.setFocus(); return True
+                        if focus is self.playlist_button:
+                            if not self.playlist_items:
+                                self.show_side_panel("playlist")
+                            if self.playlist_items:
+                                self.playlist_items[0].setFocus(Qt.OtherFocusReason)
+                        elif focus is self.description_button and getattr(self, "description_label", None) is not None:
+                            self.description_label.setFocus(Qt.OtherFocusReason)
+                        return True
                 if key == Qt.Key_Left and focus is self.subtitle_box:
                     self.quality.setFocus()
                     return True
@@ -2098,19 +2275,22 @@ class MainWindow(QMainWindow):
                     self.subtitle_box.setFocus()
                     return True
                 if key == Qt.Key_Left and focus is self.quality:
-                    self.stop_button.setFocus()
-                    return True
-                if key == Qt.Key_Right and focus is self.stop_button:
-                    self.quality.setFocus()
+                    self.fullscreen_button.setFocus()
                     return True
                 if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select) and focus is self.video_surface:
                     self.mpv_command(["cycle", "pause"])
                     return True
+                if key in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right):
+                    return True
             elif self.pages.currentWidget() == self.settings_page:
                 if focus is self.page_size_box and key == Qt.Key_Up:
                     self.settings_back_button.setFocus(); return True
+                if focus is self.page_size_box and key == Qt.Key_Down:
+                    return True
                 if focus is self.settings_back_button and key == Qt.Key_Down:
                     self.page_size_box.setFocus(); return True
+                if focus is self.settings_back_button and key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up):
+                    return True
                 if focus is self.settings_back_button and key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                     self.return_from_settings(); return True
             elif self.pages.currentWidget() == self.search_page:
@@ -2121,14 +2301,20 @@ class MainWindow(QMainWindow):
                         self.mini_rewind_button.setFocus(); return True
                     if key == Qt.Key_Right:
                         self.minimize_button.setFocus(); return True
+                    if key in (Qt.Key_Left, Qt.Key_Up):
+                        return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                         self.return_to_playback(); return True
                 if focus in mini_buttons:
                     pos = mini_buttons.index(focus)
-                    if key == Qt.Key_Left and pos > 0:
-                        mini_buttons[pos - 1].setFocus(); return True
-                    if key == Qt.Key_Right and pos < len(mini_buttons) - 1:
-                        mini_buttons[pos + 1].setFocus(); return True
+                    if key == Qt.Key_Left:
+                        if pos > 0:
+                            mini_buttons[pos - 1].setFocus()
+                        return True
+                    if key == Qt.Key_Right:
+                        if pos < len(mini_buttons) - 1:
+                            mini_buttons[pos + 1].setFocus()
+                        return True
                     if key == Qt.Key_Up:
                         self.mini_title_button.setFocus(); return True
                     if key == Qt.Key_Down:
@@ -2145,11 +2331,15 @@ class MainWindow(QMainWindow):
                          else self.keyboard_button).setFocus(); return True
                     if key == Qt.Key_Down:
                         self.keyboard_button.setFocus(); return True
+                    if key == Qt.Key_Up:
+                        return True
                 if focus is self.close_button:
                     if key == Qt.Key_Left:
                         self.minimize_button.setFocus(); return True
                     if key == Qt.Key_Down:
                         self.keyboard_button.setFocus(); return True
+                    if key in (Qt.Key_Right, Qt.Key_Up):
+                        return True
                 if key in (Qt.Key_Escape, Qt.Key_Back):
                     if self.keyboard_open:
                         self.set_keyboard_visible(False)
@@ -2157,10 +2347,18 @@ class MainWindow(QMainWindow):
                     return True
                 if focus in self.nav_buttons:
                     nav_index = self.nav_buttons.index(focus)
-                    if key == Qt.Key_Down and nav_index + 1 < len(self.nav_buttons):
-                        self.nav_buttons[nav_index + 1].setFocus(); return True
-                    if key == Qt.Key_Up and nav_index > 0:
-                        self.nav_buttons[nav_index - 1].setFocus(); return True
+                    if key == Qt.Key_Down:
+                        if nav_index + 1 < len(self.nav_buttons):
+                            self.nav_buttons[nav_index + 1].setFocus()
+                        elif self.cards:
+                            self.cards[0].setFocus()
+                        return True
+                    if key == Qt.Key_Up:
+                        if nav_index > 0:
+                            self.nav_buttons[nav_index - 1].setFocus()
+                        return True
+                    if key == Qt.Key_Left:
+                        return True
                     if key == Qt.Key_Right:
                         self.collapse_sidebar()
                         if self.feed_mode == "search":
@@ -2178,8 +2376,10 @@ class MainWindow(QMainWindow):
                         active = self.nav_modes.index(self.feed_mode) if self.feed_mode in self.nav_modes else 0
                         self.nav_buttons[active].setFocus()
                         return True
-                    if key == Qt.Key_Right and idx % cols == 0 and idx + 1 < len(self.cards):
-                        self.cards[idx + 1].setFocus(); return True
+                    if key == Qt.Key_Right:
+                        if idx % cols == 0 and idx + 1 < len(self.cards):
+                            self.cards[idx + 1].setFocus()
+                        return True
                     if key == Qt.Key_Left and idx % cols:
                         self.cards[idx - 1].setFocus(); return True
                     if key == Qt.Key_Down and idx + cols < len(self.cards):
@@ -2192,7 +2392,7 @@ class MainWindow(QMainWindow):
                             return True
                         if self.next_page_button.isEnabled():
                             self.next_page_button.setFocus()
-                            return True
+                        return True
                     if key == Qt.Key_Up and idx >= cols:
                         self.cards[idx - cols].setFocus(); return True
                     if key == Qt.Key_Up and idx < cols:
@@ -2205,22 +2405,28 @@ class MainWindow(QMainWindow):
                         return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                         self.play_index(idx); return True
+                if focus is self.query and key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
+                    self.set_keyboard_visible(True)
+                    if self.keyboard.buttons:
+                        self.keyboard.buttons[0].setFocus()
+                    return True
                 if focus is self.query and key == Qt.Key_Up:
                     (self.mini_title_button if self.mini_player.isVisible()
                      else self.minimize_button).setFocus()
                     return True
                 if focus is self.query and key == Qt.Key_Left:
-                    self.expand_sidebar()
-                    self.nav_buttons[1].setFocus()
-                    return True
-                if focus is self.query and key == Qt.Key_Right:
                     self.keyboard_button.setFocus(); return True
+                if focus is self.query and key == Qt.Key_Right:
+                    self.search_button.setFocus(); return True
                 if focus is self.keyboard_button:
                     if key == Qt.Key_Left:
                         self.expand_sidebar()
                         self.nav_buttons[1].setFocus(); return True
                     if key == Qt.Key_Right:
-                        self.search_button.setFocus(); return True
+                        self.query.setFocus(); return True
+                    if key == Qt.Key_Up:
+                        (self.mini_title_button if self.mini_player.isVisible()
+                         else self.minimize_button).setFocus(); return True
                     if key == Qt.Key_Down:
                         if self.keyboard_open and self.keyboard.buttons:
                             self.keyboard.buttons[0].setFocus()
@@ -2231,11 +2437,46 @@ class MainWindow(QMainWindow):
                         self.toggle_keyboard(); return True
                 if focus is self.search_button:
                     if key == Qt.Key_Left:
-                        self.keyboard_button.setFocus(); return True
+                        self.query.setFocus(); return True
+                    if key == Qt.Key_Right:
+                        return True
+                    if key == Qt.Key_Up:
+                        (self.mini_title_button if self.mini_player.isVisible()
+                         else self.minimize_button).setFocus(); return True
                     if key == Qt.Key_Down and self.cards:
                         self.cards[0].setFocus(); return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                         self.search(); return True
+                if focus in (self.prev_page_button, self.next_page_button):
+                    if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
+                        if focus.isEnabled():
+                            focus.click()
+                        return True
+                    if key == Qt.Key_Left and focus is self.next_page_button:
+                        target = self.prev_page_button
+                        if target.isEnabled():
+                            target.setFocus(Qt.OtherFocusReason)
+                        return True
+                    if key == Qt.Key_Right and focus is self.prev_page_button:
+                        # Never send focus to a disabled Next button at the last page.
+                        if self.next_page_button.isEnabled():
+                            self.next_page_button.setFocus(Qt.OtherFocusReason)
+                        else:
+                            self.prev_page_button.setFocus(Qt.OtherFocusReason)
+                        return True
+                    if key in (Qt.Key_Left, Qt.Key_Right):
+                        # Keep focus anchored when the adjacent page action is disabled.
+                        if focus is self.next_page_button and not focus.isEnabled():
+                            self.prev_page_button.setFocus(Qt.OtherFocusReason)
+                        elif focus is self.prev_page_button and not focus.isEnabled():
+                            self.next_page_button.setFocus(Qt.OtherFocusReason)
+                        return True
+                    if key == Qt.Key_Up:
+                        if self.cards:
+                            self.cards[-1].setFocus()
+                        return True
+                    if key == Qt.Key_Down:
+                        return True
                 if focus is self.query and key == Qt.Key_Down:
                     if self.keyboard_open and self.keyboard.buttons:
                         self.keyboard.buttons[0].setFocus()
@@ -2259,21 +2500,37 @@ class MainWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def minimize_window(self):
-        if self.isFullScreen() or self.is_playback_fullscreen:
+        if self.isMinimized():
+            return
+        if self.is_playback_fullscreen or self.isFullScreen():
+            # The windowed rectangle was saved before entering playback fullscreen.
+            # Never replace it with fullscreen geometry here.
             self._activation_state = "fullscreen"
         elif self.isMaximized():
+            self._restore_geometry = self.normalGeometry()
             self._activation_state = "maximized"
         else:
+            # geometry() is the rectangle currently shown; normalGeometry() can be stale.
+            self._restore_geometry = self.geometry()
             self._activation_state = "normal"
         self.showMinimized()
 
     def restore_window(self):
-        if self._activation_state == "fullscreen" or self.is_playback_fullscreen:
+        mode = self._activation_state
+        geometry = self._restore_geometry
+        if mode == "fullscreen":
+            # Home and playback can both be fullscreen; restore the window state itself.
+            self.setWindowState(Qt.WindowFullScreen)
             self.showFullScreen()
-        elif self._activation_state == "maximized":
+        elif mode == "maximized":
+            self.setWindowState(Qt.WindowMaximized)
             self.showMaximized()
         else:
-            self.showNormal()
+            self.setWindowState(Qt.WindowNoState)
+            self.show()
+            if geometry is not None and geometry.isValid():
+                # Apply the saved normal rectangle after the window manager maps the window.
+                QTimer.singleShot(0, lambda: self.setGeometry(geometry))
         self.raise_()
         self.activateWindow()
 
@@ -2281,13 +2538,15 @@ class MainWindow(QMainWindow):
         if event.type() == QEvent.WindowStateChange:
             try:
                 old_state = event.oldState()
-                if old_state & Qt.WindowFullScreen:
-                    self._activation_state = "fullscreen"
-                elif old_state & Qt.WindowMaximized:
-                    self._activation_state = "maximized"
-                elif not old_state & Qt.WindowMinimized:
-                    self._activation_state = "normal"
-            except (AttributeError, TypeError):
+                new_state = self.windowState()
+                if not (new_state & Qt.WindowMinimized):
+                    if old_state & Qt.WindowFullScreen:
+                        self._activation_state = "fullscreen"
+                    elif old_state & Qt.WindowMaximized:
+                        self._activation_state = "maximized"
+                    elif not (old_state & Qt.WindowMinimized):
+                        self._activation_state = "normal"
+            except (AttributeError, TypeError, RuntimeError):
                 pass
         super().changeEvent(event)
 
