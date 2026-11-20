@@ -478,7 +478,7 @@ class MainWindow(QMainWindow):
         self.mini_title_text = ""
         self.mini_title_offset = 0
         self.mini_title_timer = QTimer(self)
-        self.mini_title_timer.setInterval(280)
+        self.mini_title_timer.setInterval(180)
         self.mini_title_timer.timeout.connect(self.advance_mini_title)
         self.setStyleSheet("""
             QMainWindow, QWidget { background:#101318; color:#f4f6f8; font-family:Sans; }
@@ -814,7 +814,7 @@ class MainWindow(QMainWindow):
         side_buttons = QHBoxLayout()
         self.playlist_button = QPushButton("Queue")
         self.playlist_button.setToolTip("Antrean video")
-        self.playlist_button.clicked.connect(lambda: self.show_side_panel("playlist"))
+        self.playlist_button.clicked.connect(self.open_playlist_panel)
         self.description_button = QPushButton("Description")
         self.description_button.setToolTip("Deskripsi video")
         self.description_button.clicked.connect(lambda: self.show_side_panel("description"))
@@ -823,7 +823,7 @@ class MainWindow(QMainWindow):
         side_layout.addLayout(side_buttons)
         self.side_content = QScrollArea()
         self.side_content.setWidgetResizable(True)
-        self.side_content.setFocusPolicy(Qt.StrongFocus)
+        self.side_content.setFocusPolicy(Qt.NoFocus)
         self.side_content.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.side_content.verticalScrollBar().setFocusPolicy(Qt.NoFocus)
         self.side_text_host = QWidget()
@@ -1315,6 +1315,7 @@ class MainWindow(QMainWindow):
             self.pages.setCurrentWidget(self.search_page)
             self.mini_player.show()
             self.window_controls_widget.show()
+            QTimer.singleShot(0, self.start_mini_title_scroll)
         else:
             self.pages.setCurrentWidget(self.player_page)
             self.mini_player.hide()
@@ -1815,6 +1816,13 @@ class MainWindow(QMainWindow):
         socket.deleteLater()
         return True
 
+    def open_playlist_panel(self):
+        self.show_side_panel("playlist")
+        if self.playlist_items:
+            self.playlist_items[0].setFocus(Qt.OtherFocusReason)
+        else:
+            self.playlist_button.setFocus(Qt.OtherFocusReason)
+
     def populate_playlist(self):
         self.clear_side_content()
         self.playlist_items = []
@@ -1885,6 +1893,8 @@ class MainWindow(QMainWindow):
         if not self.background_playback:
             self.fallback_qualities.clear()
         self.mini_player.setVisible(self.background_playback)
+        if self.background_playback:
+            QTimer.singleShot(0, self.start_mini_title_scroll)
         self.window_controls_widget.show()
         self.set_playback_controls_enabled(False)
         self.slider_dragging = False
@@ -1900,7 +1910,8 @@ class MainWindow(QMainWindow):
             return
         self._playback_return_state = "maximized" if self.isMaximized() else "normal"
         # Preserve the windowed geometry before Qt replaces it with fullscreen geometry.
-        self._restore_geometry = self.normalGeometry()
+        # Capture the actual pre-fullscreen rectangle; normalGeometry() may be stale.
+        self._restore_geometry = self.geometry()
         self.is_playback_fullscreen = True
         self.showFullScreen()
         self.player_header_widget.hide()
@@ -1963,7 +1974,18 @@ class MainWindow(QMainWindow):
         self.advance_mini_title()
         available = max(1, self.mini_title_button.contentsRect().width() - 6)
         if self.mini_title_button.fontMetrics().horizontalAdvance(self.mini_title_text) > available:
+            QTimer.singleShot(0, self.start_mini_title_scroll)
+        else:
+            self.mini_title_timer.stop()
+            self.mini_title_button.setText(self.mini_title_text)
+
+    def start_mini_title_scroll(self):
+        if not self.mini_player.isVisible() or not self.mini_title_text:
+            return
+        available = max(1, self.mini_title_button.contentsRect().width() - 6)
+        if self.mini_title_button.fontMetrics().horizontalAdvance(self.mini_title_text) > available:
             self.mini_title_timer.start()
+            self.advance_mini_title()
         else:
             self.mini_title_timer.stop()
             self.mini_title_button.setText(self.mini_title_text)
@@ -2029,6 +2051,8 @@ class MainWindow(QMainWindow):
                 pass
         if event.type() == QEvent.KeyPress:
             key, focus = event.key(), QApplication.focusWidget()
+            if key == Qt.Key_Space and isinstance(watched, QPushButton):
+                return True
             if self.is_playback_fullscreen:
                 if key in (Qt.Key_Escape, Qt.Key_Back):
                     self.exit_playback_fullscreen()
@@ -2055,6 +2079,15 @@ class MainWindow(QMainWindow):
                     self.toggle_play_pause()
                     return True
             if self.pages.currentWidget() == self.player_page:
+                if focus is self.back_button:
+                    if key == Qt.Key_Down:
+                        self.play_pause_button.setFocus(Qt.OtherFocusReason); return True
+                    if key in (Qt.Key_Up, Qt.Key_Left, Qt.Key_Right):
+                        return True
+                if focus is self.player_page and key == Qt.Key_Down:
+                    self.seek_slider.setFocus(Qt.OtherFocusReason); return True
+                if focus is self.player_page and key in (Qt.Key_Up, Qt.Key_Left, Qt.Key_Right):
+                    return True
                 if key in (Qt.Key_Escape, Qt.Key_Back):
                     self.back_to_results()
                     return True
@@ -2129,51 +2162,36 @@ class MainWindow(QMainWindow):
                     item_index = self.playlist_items.index(focus)
                     if key == Qt.Key_Up:
                         if item_index > 0:
-                            self.playlist_items[item_index - 1].setFocus()
+                            self.playlist_items[item_index - 1].setFocus(Qt.OtherFocusReason)
                         else:
-                            bar = self.side_content.verticalScrollBar()
-                            if bar.value() > bar.minimum():
-                                bar.setValue(max(bar.minimum(), bar.value() - max(bar.singleStep(), 48)))
-                            else:
-                                self.playlist_button.setFocus()
+                            self.playlist_button.setFocus(Qt.OtherFocusReason)
                         return True
                     if key == Qt.Key_Down:
                         if item_index + 1 < len(self.playlist_items):
-                            self.playlist_items[item_index + 1].setFocus()
-                        else:
-                            bar = self.side_content.verticalScrollBar()
-                            if bar.value() < bar.maximum():
-                                bar.setValue(min(bar.maximum(), bar.value() + max(bar.singleStep(), 48)))
-                            else:
-                                self.side_content.setFocus()
+                            self.playlist_items[item_index + 1].setFocus(Qt.OtherFocusReason)
                         return True
                     if key == Qt.Key_Left:
                         self.playlist_button.setFocus(); return True
                     if key == Qt.Key_Right:
                         self.description_button.setFocus(); return True
                 if focus in (self.side_content, self.side_content.viewport()):
-                    scroll_bar = self.side_content.verticalScrollBar()
+                    if key == Qt.Key_Down and self.playlist_items:
+                        self.playlist_items[0].setFocus(Qt.OtherFocusReason); return True
                     if key == Qt.Key_Up:
-                        if scroll_bar.value() <= scroll_bar.minimum():
-                            self.subtitle_box.setFocus(); return True
-                        scroll_bar.setValue(max(scroll_bar.minimum(),
-                                                scroll_bar.value() - scroll_bar.singleStep()))
-                        return True
-                    if key == Qt.Key_Down:
-                        if scroll_bar.value() >= scroll_bar.maximum():
-                            self.description_button.setFocus(); return True
-                        scroll_bar.setValue(min(scroll_bar.maximum(),
-                                                scroll_bar.value() + scroll_bar.singleStep()))
+                        self.subtitle_box.setFocus(Qt.OtherFocusReason); return True
+                    if key in (Qt.Key_Up, Qt.Key_Down):
                         return True
                 if focus in (self.playlist_button, self.description_button):
                     if key == Qt.Key_Left:
-                        self.playlist_button.setFocus(); return True
+                        self.playlist_button.setFocus(Qt.OtherFocusReason); return True
                     if key == Qt.Key_Right:
-                        self.description_button.setFocus(); return True
+                        self.description_button.setFocus(Qt.OtherFocusReason); return True
                     if key == Qt.Key_Up:
-                        self.subtitle_box.setFocus(); return True
+                        self.subtitle_box.setFocus(Qt.OtherFocusReason); return True
                     if key == Qt.Key_Down:
-                        self.side_content.setFocus(); return True
+                        if focus is self.playlist_button and self.playlist_items:
+                            self.playlist_items[0].setFocus(Qt.OtherFocusReason)
+                        return True
                 if key == Qt.Key_Left and focus is self.subtitle_box:
                     self.quality.setFocus()
                     return True
@@ -2185,6 +2203,8 @@ class MainWindow(QMainWindow):
                     return True
                 if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select) and focus is self.video_surface:
                     self.mpv_command(["cycle", "pause"])
+                    return True
+                if key in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right):
                     return True
             elif self.pages.currentWidget() == self.settings_page:
                 if focus is self.page_size_box and key == Qt.Key_Up:
@@ -2405,10 +2425,10 @@ class MainWindow(QMainWindow):
     def restore_window(self):
         mode = self._activation_state
         self.showNormal()
-        if self._restore_geometry is not None:
+        if self._restore_geometry is not None and self._restore_geometry.isValid():
             self.setGeometry(self._restore_geometry)
-        if mode == "fullscreen" or self.is_playback_fullscreen:
-            self.showFullScreen()
+        if mode == "fullscreen" and self.is_playback_fullscreen:
+            QTimer.singleShot(0, self.showFullScreen)
         elif mode == "maximized":
             self.showMaximized()
         self.raise_()
