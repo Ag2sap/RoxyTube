@@ -386,6 +386,7 @@ class VideoCard(QFrame):
         # Large 16:9 thumbnail with duration overlaid in its bottom-right corner.
         self.thumbnail_frame = QFrame()
         self.thumbnail_frame.setObjectName("thumbnailFrame")
+        self.thumbnail_frame.setMinimumWidth(0)
         self.thumbnail_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.thumbnail_frame.setStyleSheet(
             "QFrame#thumbnailFrame { background:#252e3b; border:0; border-radius:5px; }")
@@ -394,6 +395,7 @@ class VideoCard(QFrame):
         self.image = QLabel(" ")
         self._thumbnail_pixmap = None
         self.image.setAlignment(Qt.AlignCenter)
+        self.image.setMinimumWidth(0)
         self.image.setMinimumHeight(70)
         self.image.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.image.setStyleSheet("background:transparent;color:#9ba8b8;border:0;font-size:11px;")
@@ -410,6 +412,7 @@ class VideoCard(QFrame):
         self.title_label = QLabel(title)
         self.title_label.setObjectName("videoTitle")
         self.title_label.setWordWrap(True)
+        self.title_label.setMinimumWidth(0)
         self.title_label.setMaximumHeight(38)
         self.title_label.setStyleSheet("font-size:13px;font-weight:700;color:#f4f6f8;background:transparent;border:0;")
         layout.addWidget(self.title_label)
@@ -418,12 +421,14 @@ class VideoCard(QFrame):
         meta_row.setSpacing(5)
         self.meta_label = QLabel(channel)
         self.meta_label.setWordWrap(False)
+        self.meta_label.setMinimumWidth(0)
         self.meta_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.meta_label.setStyleSheet("font-size:12px;font-weight:700;color:#aeb8c5;background:transparent;border:0;")
         meta_row.addWidget(self.meta_label, 1)
         self.views_label = QLabel(view_count)
         self.views_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.views_label.setWordWrap(False)
+        self.views_label.setMinimumWidth(0)
         self.views_label.setStyleSheet("font-size:11px;font-weight:700;color:#aeb8c5;background:transparent;border:0;")
         self.views_label.setVisible(bool(view_count))
         meta_row.addWidget(self.views_label, 0)
