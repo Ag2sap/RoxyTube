@@ -823,6 +823,7 @@ class MainWindow(QMainWindow):
         side_layout.addLayout(side_buttons)
         self.side_content = QScrollArea()
         self.side_content.setWidgetResizable(True)
+        self.side_content.setMinimumWidth(0)
         self.side_content.setFocusPolicy(Qt.NoFocus)
         self.side_content.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.side_content.verticalScrollBar().setFocusPolicy(Qt.NoFocus)
@@ -1830,6 +1831,10 @@ class MainWindow(QMainWindow):
             button = QPushButton((">  " if idx == self.current_index else "") + item["title"])
             button.setToolTip(item["title"])
             button.setFocusPolicy(Qt.StrongFocus)
+            # Long video titles must not force the scroll-area child wider than
+            # its viewport; otherwise the left edge of Queue appears clipped.
+            button.setMinimumWidth(0)
+            button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
             button.setStyleSheet("text-align:left;padding:6px;font-size:11px;")
             button.clicked.connect(
                 lambda checked=False, i=idx: self.play_index(i, queue=self.playback_queue)
@@ -1971,7 +1976,9 @@ class MainWindow(QMainWindow):
         self.fullscreen_controls_visible = True
         if focus_slider:
             self.seek_slider.setFocus(Qt.OtherFocusReason)
-        self.fullscreen_hide_timer.start(1000)
+            self.fullscreen_hide_timer.stop()
+        else:
+            self.fullscreen_hide_timer.start(1000)
 
     def hide_fullscreen_controls(self):
         if not self.is_playback_fullscreen:
@@ -2086,19 +2093,32 @@ class MainWindow(QMainWindow):
                     self.exit_playback_fullscreen()
                     return True
                 if self.fullscreen_controls_visible:
-                    self.fullscreen_hide_timer.start(1000)
+                    fullscreen_focus_targets = (
+                        self.seek_slider, self.previous_video_button, self.rewind_button,
+                        self.play_pause_button, self.fast_forward_button, self.next_video_button,
+                        self.stop_button, self.fullscreen_button, self.volume_slider,
+                        self.quality, self.subtitle_box
+                    )
+                    if focus in fullscreen_focus_targets:
+                        # Keep controls available while the remote is navigating them.
+                        self.fullscreen_hide_timer.stop()
+                    elif focus is self.player_page:
+                        self.fullscreen_hide_timer.start(1000)
                     if key == Qt.Key_Down and focus is self.player_page:
                         self.seek_slider.setFocus(Qt.OtherFocusReason)
                         return True
                     if key == Qt.Key_Up and focus is self.seek_slider:
                         self.hide_fullscreen_controls()
                         return True
+                    if key == Qt.Key_Down and focus is self.seek_slider:
+                        self.previous_video_button.setFocus(Qt.OtherFocusReason)
+                        return True
                     if key == Qt.Key_Down and focus in (
                         self.previous_video_button, self.rewind_button, self.play_pause_button,
                         self.fast_forward_button, self.next_video_button, self.stop_button,
-                        self.quality, self.subtitle_box, self.fullscreen_button
+                        self.fullscreen_button, self.quality, self.subtitle_box
                     ):
-                        self.hide_fullscreen_controls()
+                        # The side panel is hidden in fullscreen; don't send focus to Queue.
                         return True
                 elif key == Qt.Key_Down:
                     self.show_fullscreen_controls(focus_slider=True)
