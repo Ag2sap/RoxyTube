@@ -1932,11 +1932,14 @@ class MainWindow(QMainWindow):
         self.is_playback_fullscreen = False
         self.fullscreen_controls_visible = True
         if self._playback_return_state == "maximized":
+            self.setWindowState(Qt.WindowMaximized)
             self.showMaximized()
         else:
-            self.showNormal()
+            self.setWindowState(Qt.WindowNoState)
+            self.show()
             if self._restore_geometry is not None and self._restore_geometry.isValid():
-                self.setGeometry(self._restore_geometry)
+                geometry = self._restore_geometry
+                QTimer.singleShot(0, lambda: self.setGeometry(geometry))
         self.player_header_widget.show()
         self.player_meta.show()
         self.resolution_label.show()
@@ -2426,28 +2429,35 @@ class MainWindow(QMainWindow):
     def minimize_window(self):
         if self.isMinimized():
             return
-        if self.isFullScreen() or self.is_playback_fullscreen:
-            # Keep the windowed geometry captured before entering playback fullscreen.
-            if self._restore_geometry is None or not self._restore_geometry.isValid():
-                self._restore_geometry = self.normalGeometry()
+        if self.is_playback_fullscreen or self.isFullScreen():
+            # The windowed rectangle was saved before entering playback fullscreen.
+            # Never replace it with fullscreen geometry here.
             self._activation_state = "fullscreen"
-        else:
+        elif self.isMaximized():
             self._restore_geometry = self.normalGeometry()
-            if self.isMaximized():
-                self._activation_state = "maximized"
-            else:
-                self._activation_state = "normal"
+            self._activation_state = "maximized"
+        else:
+            # geometry() is the rectangle currently shown; normalGeometry() can be stale.
+            self._restore_geometry = self.geometry()
+            self._activation_state = "normal"
         self.showMinimized()
 
     def restore_window(self):
         mode = self._activation_state
-        self.showNormal()
-        if self._restore_geometry is not None and self._restore_geometry.isValid():
-            self.setGeometry(self._restore_geometry)
+        geometry = self._restore_geometry
         if mode == "fullscreen" and self.is_playback_fullscreen:
-            QTimer.singleShot(0, self.showFullScreen)
+            # Restore the actual window state directly; avoid an intermediate showNormal().
+            self.setWindowState(Qt.WindowFullScreen)
+            self.showFullScreen()
         elif mode == "maximized":
+            self.setWindowState(Qt.WindowMaximized)
             self.showMaximized()
+        else:
+            self.setWindowState(Qt.WindowNoState)
+            self.show()
+            if geometry is not None and geometry.isValid():
+                # Apply the saved normal rectangle after the window manager maps the window.
+                QTimer.singleShot(0, lambda: self.setGeometry(geometry))
         self.raise_()
         self.activateWindow()
 
