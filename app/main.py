@@ -373,7 +373,8 @@ class VideoCard(QFrame):
         self.on_activate = None
         self.setObjectName("videoCard")
         self.setFocusPolicy(Qt.StrongFocus)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        # Ignore content-derived width hints so both grid columns stay equal on every page.
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.setStyleSheet("""
             QFrame#videoCard { background:#1a202a; border:2px solid #303b4a; border-radius:9px; }
             QFrame#videoCard:focus { background:#29384b; border:3px solid #ffd166; }
@@ -387,7 +388,7 @@ class VideoCard(QFrame):
         self.thumbnail_frame = QFrame()
         self.thumbnail_frame.setObjectName("thumbnailFrame")
         self.thumbnail_frame.setMinimumWidth(0)
-        self.thumbnail_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.thumbnail_frame.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.thumbnail_frame.setStyleSheet(
             "QFrame#thumbnailFrame { background:#252e3b; border:0; border-radius:5px; }")
         thumb_layout = QGridLayout(self.thumbnail_frame)
@@ -397,7 +398,7 @@ class VideoCard(QFrame):
         self.image.setAlignment(Qt.AlignCenter)
         self.image.setMinimumWidth(0)
         self.image.setMinimumHeight(70)
-        self.image.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.image.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         self.image.setStyleSheet("background:transparent;color:#9ba8b8;border:0;font-size:11px;")
         thumb_layout.addWidget(self.image, 0, 0)
         self.duration_label = QLabel(duration or "")
