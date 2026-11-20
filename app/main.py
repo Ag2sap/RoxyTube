@@ -1846,7 +1846,9 @@ class MainWindow(QMainWindow):
             label = QLabel(text or "Memuat deskripsi…")
             label.setWordWrap(True)
             label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            label.setFocusPolicy(Qt.StrongFocus)
             label.setStyleSheet("font-size:11px;color:#e4e9ef;border:0;")
+            self.description_label = label
             self.side_text_layout.addWidget(label)
         else:
             self.populate_playlist()
@@ -1855,6 +1857,7 @@ class MainWindow(QMainWindow):
 
     def clear_side_content(self):
         self.playlist_items = []
+        self.description_label = None
         while self.side_text_layout.count():
             item = self.side_text_layout.takeAt(0)
             if item.widget():
@@ -2199,6 +2202,29 @@ class MainWindow(QMainWindow):
                         self.playlist_button.setFocus(); return True
                     if key == Qt.Key_Right:
                         self.description_button.setFocus(); return True
+                if focus is getattr(self, "description_label", None) and focus is not None:
+                    bar = self.side_content.verticalScrollBar()
+                    step = max(bar.singleStep(), 48)
+                    if key == Qt.Key_Up:
+                        if bar.value() > bar.minimum():
+                            bar.setValue(max(bar.minimum(), bar.value() - step))
+                        else:
+                            self.description_button.setFocus(Qt.OtherFocusReason)
+                        return True
+                    if key == Qt.Key_Down:
+                        if bar.value() < bar.maximum():
+                            bar.setValue(min(bar.maximum(), bar.value() + step))
+                        else:
+                            self.description_button.setFocus(Qt.OtherFocusReason)
+                        return True
+                    if key == Qt.Key_Left:
+                        self.playlist_button.setFocus(Qt.OtherFocusReason)
+                        return True
+                    if key == Qt.Key_Right:
+                        self.description_button.setFocus(Qt.OtherFocusReason)
+                        return True
+                    if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
+                        return True
                 if focus in (self.side_content, self.side_content.viewport()):
                     if key == Qt.Key_Down and self.playlist_items:
                         self.playlist_items[0].setFocus(Qt.OtherFocusReason); return True
@@ -2219,6 +2245,8 @@ class MainWindow(QMainWindow):
                                 self.show_side_panel("playlist")
                             if self.playlist_items:
                                 self.playlist_items[0].setFocus(Qt.OtherFocusReason)
+                        elif focus is self.description_button and getattr(self, "description_label", None) is not None:
+                            self.description_label.setFocus(Qt.OtherFocusReason)
                         return True
                 if key == Qt.Key_Left and focus is self.subtitle_box:
                     self.quality.setFocus()
@@ -2400,6 +2428,9 @@ class MainWindow(QMainWindow):
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                         self.search(); return True
                 if focus in (self.prev_page_button, self.next_page_button):
+                    if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
+                        focus.click()
+                        return True
                     if key == Qt.Key_Left and focus is self.next_page_button:
                         self.prev_page_button.setFocus(); return True
                     if key == Qt.Key_Right and focus is self.prev_page_button:
