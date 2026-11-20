@@ -1908,7 +1908,12 @@ class MainWindow(QMainWindow):
         if self.is_playback_fullscreen:
             self.exit_playback_fullscreen()
             return
-        self._playback_return_state = "maximized" if self.isMaximized() else "normal"
+        if self.isFullScreen():
+            self._playback_return_state = "fullscreen"
+        elif self.isMaximized():
+            self._playback_return_state = "maximized"
+        else:
+            self._playback_return_state = "normal"
         # Preserve the windowed geometry before Qt replaces it with fullscreen geometry.
         # Capture the actual pre-fullscreen rectangle; normalGeometry() may be stale.
         self._restore_geometry = self.geometry()
@@ -1931,7 +1936,10 @@ class MainWindow(QMainWindow):
         self.fullscreen_hide_timer.stop()
         self.is_playback_fullscreen = False
         self.fullscreen_controls_visible = True
-        if self._playback_return_state == "maximized":
+        if self._playback_return_state == "fullscreen":
+            self.setWindowState(Qt.WindowFullScreen)
+            self.showFullScreen()
+        elif self._playback_return_state == "maximized":
             self.setWindowState(Qt.WindowMaximized)
             self.showMaximized()
         else:
@@ -2445,8 +2453,8 @@ class MainWindow(QMainWindow):
     def restore_window(self):
         mode = self._activation_state
         geometry = self._restore_geometry
-        if mode == "fullscreen" and self.is_playback_fullscreen:
-            # Restore the actual window state directly; avoid an intermediate showNormal().
+        if mode == "fullscreen":
+            # Home and playback can both be fullscreen; restore the window state itself.
             self.setWindowState(Qt.WindowFullScreen)
             self.showFullScreen()
         elif mode == "maximized":
