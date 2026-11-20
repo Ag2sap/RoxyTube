@@ -375,8 +375,8 @@ class VideoCard(QFrame):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setStyleSheet("""
-            QFrame#videoCard { background:transparent; border:0; }
-            QFrame#videoCard:focus { background:transparent; border:0; }
+            QFrame#videoCard { background:transparent; border:2px solid #303b4a; border-radius:9px; }
+            QFrame#videoCard:focus { background:transparent; border:3px solid #ffd166; }
             QFrame#videoCard:focus QLabel#videoTitle { color:#ffd166; }
         """)
         layout = QVBoxLayout(self)
@@ -400,7 +400,7 @@ class VideoCard(QFrame):
         self.duration_label = QLabel(duration or "")
         self.duration_label.setAlignment(Qt.AlignCenter)
         self.duration_label.setStyleSheet(
-            "QLabel { background:transparent; color:white; border:0;"
+            "QLabel { background:rgba(0,0,0,220); color:white; border-radius:3px;"
             " padding:2px 5px; font-size:10px; font-weight:700; }")
         self.duration_label.setVisible(bool(duration))
         thumb_layout.addWidget(self.duration_label, 0, 0, Qt.AlignRight | Qt.AlignBottom)
@@ -418,12 +418,12 @@ class VideoCard(QFrame):
         self.meta_label = QLabel(channel)
         self.meta_label.setWordWrap(False)
         self.meta_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.meta_label.setStyleSheet("font-size:10px;color:#aeb8c5;border:0;")
+        self.meta_label.setStyleSheet("font-size:12px;font-weight:700;color:#aeb8c5;border:0;")
         meta_row.addWidget(self.meta_label, 1)
         self.views_label = QLabel(view_count)
         self.views_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.views_label.setWordWrap(False)
-        self.views_label.setStyleSheet("font-size:10px;color:#aeb8c5;border:0;")
+        self.views_label.setStyleSheet("font-size:11px;font-weight:700;color:#aeb8c5;border:0;")
         self.views_label.setVisible(bool(view_count))
         meta_row.addWidget(self.views_label, 0)
         layout.addLayout(meta_row)
@@ -511,6 +511,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet("""
             QMainWindow, QWidget { background:#101318; color:#f4f6f8; font-family:Sans; }
             QLabel#brand { color:#ffffff; font-size:17px; font-weight:750; }
+            QLabel#brandHeader { color:#ffffff; font-size:20px; font-weight:800; }
             QLabel#hint { color:#aeb8c5; font-size:11px; }
             QLineEdit,QComboBox { background:#202733; color:white; border:2px solid #465366;
                 border-radius:7px; padding:5px 7px; font-size:13px; min-height:23px; }
@@ -576,10 +577,11 @@ class MainWindow(QMainWindow):
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(5)
         logo = QLabel()
-        logo.setPixmap(youtube_logo_icon(22).pixmap(22, 22))
+        logo.setFixedSize(28, 28)
+        logo.setPixmap(youtube_logo_icon(28).pixmap(28, 28))
         brand = QLabel("RoxyTube")
-        brand.setObjectName("brand")
-        brand.setMaximumWidth(92)
+        brand.setObjectName("brandHeader")
+        brand.setMaximumWidth(112)
         header.addWidget(logo)
         header.addWidget(brand)
 
@@ -822,7 +824,7 @@ class MainWindow(QMainWindow):
         self.player_meta.setObjectName("hint")
         self.player_meta.setWordWrap(False)
         self.player_meta.setStyleSheet(
-            "color:#b9c5d3;font-size:11px;padding:2px 4px;border:0;")
+            "color:#b9c5d3;font-size:12px;font-weight:700;padding:2px 4px;border:0;")
         self.player_views_label = QLabel("")
         self.player_views_label.setObjectName("hint")
         self.player_views_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
