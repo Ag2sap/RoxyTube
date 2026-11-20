@@ -1672,7 +1672,7 @@ class MainWindow(QMainWindow):
         if view_count:
             self.playback_queue[index]["view_count"] = view_count
             self.player_views_label.setText(view_count)
-            self.player_views_label.show()
+            self.player_views_label.setVisible(not self.is_playback_fullscreen)
         description = data.get("description") or self.playback_queue[index].get("description") or "Deskripsi tidak tersedia."
         self.playback_queue[index]["description"] = description
         self.show_side_panel("description", description)
