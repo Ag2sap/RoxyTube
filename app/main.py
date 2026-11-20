@@ -375,8 +375,8 @@ class VideoCard(QFrame):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setStyleSheet("""
-            QFrame#videoCard { background:transparent; border:2px solid #303b4a; border-radius:9px; }
-            QFrame#videoCard:focus { background:transparent; border:3px solid #ffd166; }
+            QFrame#videoCard { background:#1a202a; border:2px solid #303b4a; border-radius:9px; }
+            QFrame#videoCard:focus { background:#29384b; border:3px solid #ffd166; }
             QFrame#videoCard:focus QLabel#videoTitle { color:#ffd166; }
         """)
         layout = QVBoxLayout(self)
@@ -388,7 +388,7 @@ class VideoCard(QFrame):
         self.thumbnail_frame.setObjectName("thumbnailFrame")
         self.thumbnail_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.thumbnail_frame.setStyleSheet(
-            "QFrame#thumbnailFrame { background:transparent; border:0; border-radius:0; }")
+            "QFrame#thumbnailFrame { background:#252e3b; border:0; border-radius:5px; }")
         thumb_layout = QGridLayout(self.thumbnail_frame)
         thumb_layout.setContentsMargins(0, 0, 5, 5)
         self.image = QLabel(" ")
