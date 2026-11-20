@@ -2416,7 +2416,9 @@ class MainWindow(QMainWindow):
                         self.keyboard_button.setFocus()
                         return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
-                        self.play_index(idx); return True
+                        # Use the card's absolute results index, not its position
+                        # inside the current page's self.cards list.
+                        self.play_index(focus.index); return True
                 if focus is self.query and key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                     self.set_keyboard_visible(True)
                     if self.keyboard.buttons:
