@@ -137,6 +137,21 @@ def thumbnail_url(entry):
     return entry.get("thumbnail")
 
 
+def format_view_count(value):
+    """Format YouTube views compactly for the video-card metadata row."""
+    try:
+        count = max(0, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return ""
+    if count >= 1_000_000_000:
+        return f"{count / 1_000_000_000:.1f}".replace(".", ",") + " M ditonton"
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}".replace(".", ",") + " jt ditonton"
+    if count >= 1_000:
+        return f"{count / 1_000:.1f}".replace(".", ",") + " rb ditonton"
+    return f"{count:,}".replace(",", ".") + " ditonton"
+
+
 class TvKeyboard(QWidget):
     """CatTube-style 10-unit remote keyboard, adapted for YouTube search."""
     ROW_UNITS = 10
@@ -352,7 +367,7 @@ class TvKeyboard(QWidget):
 
 
 class VideoCard(QFrame):
-    def __init__(self, index, title, channel, duration, parent=None):
+    def __init__(self, index, title, channel, duration, view_count="", parent=None):
         super().__init__(parent)
         self.index = index
         self.on_activate = None
@@ -395,10 +410,21 @@ class VideoCard(QFrame):
         self.title_label.setMaximumHeight(38)
         self.title_label.setStyleSheet("font-size:13px;font-weight:700;color:#f4f6f8;border:0;")
         layout.addWidget(self.title_label)
+        meta_row = QHBoxLayout()
+        meta_row.setContentsMargins(0, 0, 0, 0)
+        meta_row.setSpacing(5)
         self.meta_label = QLabel(channel)
         self.meta_label.setWordWrap(False)
+        self.meta_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.meta_label.setStyleSheet("font-size:10px;color:#aeb8c5;border:0;")
-        layout.addWidget(self.meta_label)
+        meta_row.addWidget(self.meta_label, 1)
+        self.views_label = QLabel(view_count)
+        self.views_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.views_label.setWordWrap(False)
+        self.views_label.setStyleSheet("font-size:10px;color:#aeb8c5;border:0;")
+        self.views_label.setVisible(bool(view_count))
+        meta_row.addWidget(self.views_label, 0)
+        layout.addLayout(meta_row)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1161,6 +1187,7 @@ class MainWindow(QMainWindow):
                 self.results.append({
                     "url": url, "title": entry.get("title") or "Video tanpa judul",
                     "channel": entry.get("channel") or entry.get("uploader") or "YouTube",
+                    "view_count": format_view_count(entry.get("view_count")),
                     "thumbnail": thumbnail_url(entry), "duration": duration_text,
                     "duration_seconds": float(duration or 0),
                     "description": entry.get("description") or "",
@@ -1195,7 +1222,8 @@ class MainWindow(QMainWindow):
         columns = 2
         for idx in range(start, end):
             result = self.results[idx]
-            card = VideoCard(idx, result["title"], result["channel"], result["duration"], self.cards_host)
+            card = VideoCard(idx, result["title"], result["channel"], result["duration"],
+                             result.get("view_count", ""), self.cards_host)
             card.setMinimumHeight(250)
             card.on_activate = self.play_index
             card.installEventFilter(self)
