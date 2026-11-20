@@ -2485,7 +2485,8 @@ class MainWindow(QMainWindow):
                         return True
                     if key == Qt.Key_Up:
                         if self.cards:
-                            self.cards[-1].setFocus()
+                            # Return to the first thumbnail at the top-left.
+                            self.cards[0].setFocus(Qt.OtherFocusReason)
                         return True
                     if key == Qt.Key_Down:
                         return True
