@@ -4,7 +4,7 @@ from __future__ import annotations
 import json, os, shutil, sys
 from pathlib import Path
 from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve, QSize
-from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QIcon
+from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QIcon, QPainterPath
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDiskCache, QLocalSocket, QLocalServer
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
@@ -92,6 +92,27 @@ def interface_icon(kind, size=20, color="#ffffff"):
                 y = 7 + row * 4
                 painter.drawLine(x, y, x + 1, y)
         painter.drawLine(width // 3, height - 6, (width * 2) // 3, height - 6)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def youtube_logo_icon(size=20):
+    """Draw the red YouTube play mark without relying on a platform theme icon."""
+    width = height = int(size)
+    pixmap = QPixmap(width, height)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor("#ff0033"))
+    painter.drawRoundedRect(1, 3, width - 2, height - 6, 4, 4)
+    triangle = QPainterPath()
+    triangle.moveTo(width * 0.42, height * 0.28)
+    triangle.lineTo(width * 0.42, height * 0.72)
+    triangle.lineTo(width * 0.73, height * 0.50)
+    triangle.closeSubpath()
+    painter.setBrush(QColor("#ffffff"))
+    painter.drawPath(triangle)
     painter.end()
     return QIcon(pixmap)
 
@@ -527,7 +548,7 @@ class MainWindow(QMainWindow):
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(5)
         logo = QLabel()
-        logo.setPixmap(self.style().standardIcon(QStyle.SP_MediaPlay).pixmap(20, 20))
+        logo.setPixmap(youtube_logo_icon(22).pixmap(22, 22))
         brand = QLabel("RoxyTube")
         brand.setObjectName("brand")
         brand.setMaximumWidth(92)
@@ -594,28 +615,29 @@ class MainWindow(QMainWindow):
         mini_layout.addLayout(mini_controls)
         header.addStretch(1)
         header.addWidget(self.mini_player, 0, Qt.AlignRight)
+        header.addSpacing(8)
         self.mini_player.hide()
 
         # Keep window controls in the header so the whole group aligns with Search.
         self.window_controls_widget = QWidget(content)
-        self.window_controls_widget.setFixedSize(57, 26)
+        self.window_controls_widget.setFixedSize(77, 34)
         window_controls = QHBoxLayout(self.window_controls_widget)
         window_controls.setContentsMargins(0, 0, 0, 0)
         window_controls.setSpacing(1)
         self.minimize_button = QPushButton()
         self.minimize_button.setIcon(monochrome_icon(
-            self.style().standardIcon(QStyle.SP_TitleBarMinButton), QSize(15, 15), "#ffffff"))
-        self.minimize_button.setFixedSize(27, 25)
+            self.style().standardIcon(QStyle.SP_TitleBarMinButton), QSize(20, 20), "#ffffff"))
+        self.minimize_button.setFixedSize(38, 34)
         self.minimize_button.setToolTip("Minimize aplikasi")
         self.minimize_button.clicked.connect(self.minimize_window)
         self.close_button = QPushButton()
         self.close_button.setIcon(monochrome_icon(
-            self.style().standardIcon(QStyle.SP_TitleBarCloseButton), QSize(15, 15), "#ffffff"))
-        self.close_button.setFixedSize(27, 25)
+            self.style().standardIcon(QStyle.SP_TitleBarCloseButton), QSize(20, 20), "#ffffff"))
+        self.close_button.setFixedSize(38, 34)
         self.close_button.setToolTip("Tutup aplikasi dan hentikan playback")
         self.close_button.clicked.connect(self.close)
         for widget in (self.minimize_button, self.close_button):
-            widget.setIconSize(QSize(15, 15))
+            widget.setIconSize(QSize(20, 20))
             widget.setStyleSheet(
                 "QPushButton{padding:0;border:0;background:transparent;border-radius:4px;}"
                 "QPushButton:focus{background:#3a4b60;border:2px solid #ffd166;}"
@@ -1298,8 +1320,8 @@ class MainWindow(QMainWindow):
             self.mini_player.hide()
             self.window_controls_widget.hide()
         self.video_surface.winId()
-        # Keep keyboard focus in Roxy when MPV is embedded in the native surface.
-        self.play_pause_button.setFocus(Qt.OtherFocusReason)
+        # Keep focus on the Qt page until MPV starts and enables its controls.
+        self.player_page.setFocus(Qt.OtherFocusReason)
         self._launch_player()
 
     def _launch_player(self):
@@ -1366,6 +1388,9 @@ class MainWindow(QMainWindow):
             self.player_status.setText("Mengambil stream video…")
             self.set_playback_controls_enabled(True)
             self.set_mini_controls_enabled(True)
+            if self.pages.currentWidget() == self.player_page and not self.is_playback_fullscreen:
+                QTimer.singleShot(0, lambda: self.play_pause_button.setFocus(Qt.OtherFocusReason)
+                                  if self.process_is_running(self.player_process) else None)
             self.mpv_event_attempts = 0
             QTimer.singleShot(250, lambda i=self.current_index, p=process:
                               self.connect_mpv_events(i, p))
@@ -1874,6 +1899,8 @@ class MainWindow(QMainWindow):
             self.exit_playback_fullscreen()
             return
         self._playback_return_state = "maximized" if self.isMaximized() else "normal"
+        # Preserve the windowed geometry before Qt replaces it with fullscreen geometry.
+        self._restore_geometry = self.normalGeometry()
         self.is_playback_fullscreen = True
         self.showFullScreen()
         self.player_header_widget.hide()
@@ -1897,6 +1924,8 @@ class MainWindow(QMainWindow):
             self.showMaximized()
         else:
             self.showNormal()
+            if self._restore_geometry is not None and self._restore_geometry.isValid():
+                self.setGeometry(self._restore_geometry)
         self.player_header_widget.show()
         self.player_meta.show()
         self.resolution_label.show()
@@ -1998,7 +2027,7 @@ class MainWindow(QMainWindow):
                     self.fullscreen_hide_timer.start(1000)
             except (AttributeError, RuntimeError, TypeError):
                 pass
-        if event.type() == QEvent.KeyPress and self.isActiveWindow():
+        if event.type() == QEvent.KeyPress:
             key, focus = event.key(), QApplication.focusWidget()
             if self.is_playback_fullscreen:
                 if key in (Qt.Key_Escape, Qt.Key_Back):
@@ -2360,13 +2389,17 @@ class MainWindow(QMainWindow):
     def minimize_window(self):
         if self.isMinimized():
             return
-        self._restore_geometry = self.normalGeometry()
         if self.isFullScreen() or self.is_playback_fullscreen:
+            # Keep the windowed geometry captured before entering playback fullscreen.
+            if self._restore_geometry is None or not self._restore_geometry.isValid():
+                self._restore_geometry = self.normalGeometry()
             self._activation_state = "fullscreen"
-        elif self.isMaximized():
-            self._activation_state = "maximized"
         else:
-            self._activation_state = "normal"
+            self._restore_geometry = self.normalGeometry()
+            if self.isMaximized():
+                self._activation_state = "maximized"
+            else:
+                self._activation_state = "normal"
         self.showMinimized()
 
     def restore_window(self):
