@@ -861,7 +861,7 @@ class MainWindow(QMainWindow):
         self.search_button.setIconSize(QSize(20, 20))
         self.search_button.setFixedSize(38, 34)
         self.search_button.setFocusPolicy(Qt.StrongFocus)
-        self.search_button.setToolTip("Cari video")
+        self.search_button.setToolTip("Cari video atau channel sesuai menu aktif")
         self.search_button.clicked.connect(self.search)
         search_row.addWidget(self.query, 1)
         search_row.addWidget(self.keyboard_button)
@@ -2586,7 +2586,7 @@ class MainWindow(QMainWindow):
                         self.play_pause_button.setFocus(Qt.OtherFocusReason); return True
                     if key in (Qt.Key_Up, Qt.Key_Left, Qt.Key_Right):
                         return True
-                if focus is self.player_page and key == Qt.Key_Down:
+                if focus in (self.player_page, self.video_surface) and key == Qt.Key_Down:
                     self.channel_profile_button.setFocus(Qt.OtherFocusReason); return True
                 if focus is self.channel_profile_button:
                     if key == Qt.Key_Up:
@@ -2827,7 +2827,7 @@ class MainWindow(QMainWindow):
                         return True
                     if key == Qt.Key_Right:
                         self.collapse_sidebar()
-                        if self.feed_mode == "search":
+                        if self.feed_mode in ("search", "channels"):
                             self.keyboard_button.setFocus()
                         elif self.cards:
                             self.cards[0].setFocus()
@@ -2873,9 +2873,13 @@ class MainWindow(QMainWindow):
                         self.keyboard_button.setFocus(Qt.OtherFocusReason)
                         return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
-                        # Use the card's absolute results index, not its position
-                        # inside the current page's self.cards list.
-                        self.play_index(focus.index); return True
+                        # Use the absolute result index, not the current page-local
+                        # position. Channel cards open the channel destination later.
+                        if self.search_kind == "channels":
+                            self.open_channel_preview(focus.index)
+                        else:
+                            self.play_index(focus.index)
+                        return True
                 if focus is self.query and key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                     self.set_keyboard_visible(True)
                     if self.keyboard.buttons:
@@ -2892,7 +2896,8 @@ class MainWindow(QMainWindow):
                 if focus is self.keyboard_button:
                     if key == Qt.Key_Left:
                         self.expand_sidebar()
-                        self.nav_buttons[1].setFocus(); return True
+                        active = self.nav_modes.index(self.feed_mode) if self.feed_mode in self.nav_modes else 1
+                        self.nav_buttons[active].setFocus(); return True
                     if key == Qt.Key_Right:
                         self.query.setFocus(); return True
                     if key == Qt.Key_Up:
