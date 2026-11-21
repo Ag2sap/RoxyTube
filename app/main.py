@@ -1597,14 +1597,23 @@ class MainWindow(QMainWindow):
             self.channel_avatar_lookup_process = process
             process.setProgram(YTDLP)
             process.setArguments([
-                "--no-warnings", "--skip-download", "--flat-playlist",
-                "--playlist-items", "1", "--dump-single-json", url,
+                "--no-warnings", "--socket-timeout", "10", "--skip-download",
+                "--flat-playlist", "--playlist-items", "1", "--dump-single-json", url,
             ])
             process.finished.connect(
                 lambda code, _status, p=process, c=card: self.channel_avatar_lookup_finished(p, c, code)
             )
+            process.errorOccurred.connect(
+                lambda _error, p=process: self.channel_avatar_lookup_error(p)
+            )
             process.start()
             return
+
+    def channel_avatar_lookup_error(self, process):
+        if process is self.channel_avatar_lookup_process:
+            self.channel_avatar_lookup_process = None
+            process.deleteLater()
+            self.load_next_channel_avatar_lookup()
 
     def channel_avatar_lookup_finished(self, process, card, exit_code):
         if process is not self.channel_avatar_lookup_process:
