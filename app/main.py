@@ -3,6 +3,7 @@
 from __future__ import annotations
 import json, os, shutil, sys
 from pathlib import Path
+from urllib.parse import quote_plus
 from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve, QSize, QRect
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QIcon, QPainterPath
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDiskCache, QLocalSocket, QLocalServer
@@ -150,6 +151,52 @@ def format_view_count(value):
     if count >= 1_000:
         return f"{count / 1_000:.1f}".replace(".", ",") + " rb ditonton"
     return f"{count:,}".replace(",", ".") + " ditonton"
+
+
+def format_subscriber_count(value):
+    try:
+        count = max(0, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return ""
+    if count >= 1_000_000_000:
+        number, suffix = count / 1_000_000_000, " M subscriber"
+    elif count >= 1_000_000:
+        number, suffix = count / 1_000_000, " jt subscriber"
+    elif count >= 1_000:
+        number, suffix = count / 1_000, " rb subscriber"
+    else:
+        return f"{count:,}".replace(",", ".") + " subscriber"
+    return f"{number:.1f}".replace(".", ",") + suffix
+
+
+def channel_avatar_url(entry):
+    for key in ("channel_thumbnail", "uploader_thumbnail", "channel_avatar"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            return value
+    images = entry.get("channel_thumbnails") or []
+    if not images and entry.get("_type") in ("url", "playlist"):
+        images = entry.get("thumbnails") or []
+    usable = [item for item in images if isinstance(item, dict) and item.get("url")]
+    if usable:
+        usable.sort(key=lambda item: abs((item.get("width") or 96) - 96))
+        return usable[0]["url"]
+    return ""
+
+
+def channel_page_url(entry):
+    candidate = entry.get("channel_url") or entry.get("uploader_url")
+    if candidate and candidate.startswith(("http://", "https://")):
+        return candidate
+    channel_id = entry.get("channel_id")
+    if not channel_id and entry.get("_type") in ("url", "playlist"):
+        channel_id = entry.get("id")
+    if channel_id:
+        return f"https://www.youtube.com/channel/{channel_id}"
+    candidate = entry.get("url") or entry.get("webpage_url")
+    if candidate and ("/channel/" in candidate or "/@" in candidate):
+        return candidate if candidate.startswith("http") else "https://www.youtube.com/" + candidate.lstrip("/")
+    return ""
 
 
 class TvKeyboard(QWidget):
@@ -367,7 +414,7 @@ class TvKeyboard(QWidget):
 
 
 class VideoCard(QFrame):
-    def __init__(self, index, title, channel, duration, view_count="", parent=None):
+    def __init__(self, index, title, channel, duration, view_count="", avatar_url="", parent=None):
         super().__init__(parent)
         self.index = index
         self.on_activate = None
@@ -406,6 +453,14 @@ class VideoCard(QFrame):
         self.duration_label.setStyleSheet(
             "QLabel { background:rgba(0,0,0,220); color:white; border-radius:3px;"
             " padding:2px 5px; font-size:10px; font-weight:700; }")
+        self.channel_avatar_url = avatar_url or ""
+        self.avatar_label = QLabel((channel or "Y")[:1].upper())
+        self.avatar_label.setFixedSize(30, 30)
+        self.avatar_label.setAlignment(Qt.AlignCenter)
+        self.avatar_label.setStyleSheet(
+            "QLabel{background:#35465d;color:white;border:2px solid white;"
+            "border-radius:15px;font-size:12px;font-weight:800;}")
+        thumb_layout.addWidget(self.avatar_label, 0, 0, Qt.AlignLeft | Qt.AlignBottom)
         self.duration_label.setVisible(bool(duration))
         thumb_layout.addWidget(self.duration_label, 0, 0, Qt.AlignRight | Qt.AlignBottom)
         layout.addWidget(self.thumbnail_frame)
@@ -472,6 +527,85 @@ class VideoCard(QFrame):
         self.image.setText("")
         self.update_thumbnail_pixmap()
 
+    def set_channel_avatar(self, pixmap):
+        if pixmap is None or pixmap.isNull():
+            return
+        self.avatar_label.setText("")
+        self.avatar_label.setPixmap(circular_avatar(pixmap, 30))
+
+
+def circular_avatar(pixmap, size=30):
+    if pixmap is None or pixmap.isNull():
+        return QPixmap()
+    scaled = pixmap.scaled(size, size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+    x = max(0, (scaled.width() - size) // 2)
+    y = max(0, (scaled.height() - size) // 2)
+    cropped = scaled.copy(QRect(x, y, size, size))
+    result = QPixmap(size, size)
+    result.fill(Qt.transparent)
+    painter = QPainter(result)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    path = QPainterPath()
+    path.addEllipse(0, 0, size, size)
+    painter.setClipPath(path)
+    painter.drawPixmap(0, 0, cropped)
+    painter.end()
+    return result
+
+
+class ChannelCard(QFrame):
+    def __init__(self, index, name, subscribers="", description="", avatar_url="", parent=None):
+        super().__init__(parent)
+        self.index = index
+        self.on_activate = None
+        self.setObjectName("channelCard")
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.setMinimumHeight(108)
+        self.setStyleSheet("""
+            QFrame#channelCard{background:#1a202a;border:2px solid #303b4a;border-radius:9px;}
+            QFrame#channelCard:focus{background:#29384b;border:3px solid #ffd166;}
+            QFrame#channelCard:focus QLabel#channelName{color:#ffd166;}
+        """)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(10, 8, 10, 8)
+        row.setSpacing(10)
+        self.avatar_label = QLabel((name or "C")[:1].upper())
+        self.avatar_label.setFixedSize(54, 54)
+        self.avatar_label.setAlignment(Qt.AlignCenter)
+        self.avatar_label.setStyleSheet(
+            "QLabel{background:#35465d;color:white;border:2px solid #aeb8c5;"
+            "border-radius:27px;font-size:19px;font-weight:800;}")
+        row.addWidget(self.avatar_label, 0, Qt.AlignVCenter)
+        details = QVBoxLayout()
+        details.setSpacing(3)
+        self.name_label = QLabel(name or "Channel tanpa nama")
+        self.name_label.setObjectName("channelName")
+        self.name_label.setWordWrap(True)
+        self.name_label.setStyleSheet("font-size:13px;font-weight:800;color:#f4f6f8;background:transparent;border:0;")
+        details.addWidget(self.name_label)
+        self.subscriber_label = QLabel(subscribers or "Channel YouTube")
+        self.subscriber_label.setObjectName("hint")
+        details.addWidget(self.subscriber_label)
+        self.description_label = QLabel(description or " ")
+        self.description_label.setWordWrap(True)
+        self.description_label.setMaximumHeight(34)
+        self.description_label.setStyleSheet("font-size:10px;color:#aeb8c5;background:transparent;border:0;")
+        details.addWidget(self.description_label)
+        row.addLayout(details, 1)
+        self.channel_avatar_url = avatar_url or ""
+
+    def set_channel_avatar(self, pixmap):
+        if pixmap is None or pixmap.isNull():
+            return
+        self.avatar_label.setText("")
+        self.avatar_label.setPixmap(circular_avatar(pixmap, 54))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and callable(self.on_activate):
+            self.on_activate(self.index)
+        super().mousePressEvent(event)
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -495,6 +629,12 @@ class MainWindow(QMainWindow):
         self.thumbnail_active = 0
         self.thumbnail_cards = {}
         self.thumbnail_replies = set()
+        self.avatar_queue = []
+        self.avatar_active = 0
+        self.avatar_replies = set()
+        self.search_kind = "videos"
+        self.channel_profile_reply = None
+        self.description_expanded = False
         self.network = QNetworkAccessManager(self)
         self.cache = QNetworkDiskCache(self)
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -574,6 +714,7 @@ class MainWindow(QMainWindow):
             ("Cari", "search", QStyle.SP_FileDialogContentsView),
             ("Trending", "trending", QStyle.SP_BrowserReload),
             ("Video", "videos", QStyle.SP_MediaPlay),
+            ("Channel", "channels", QStyle.SP_DirIcon),
             ("Riwayat", "history", QStyle.SP_FileDialogInfoView),
             ("Favorit", "favorites", QStyle.SP_DialogApplyButton),
             ("Playlist", "playlists", QStyle.SP_FileDialogListView),
