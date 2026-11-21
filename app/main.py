@@ -2647,6 +2647,9 @@ class MainWindow(QMainWindow):
                 candidate for candidate in combos if candidate is not None and (
                     focus is candidate or watched is candidate
                     or watched is candidate.view() or watched is candidate.view().viewport()
+                    or watched is candidate.view().window()
+                    or focus is candidate.view().window()
+                    or (isinstance(focus, QWidget) and candidate.view().isAncestorOf(focus))
                 )
             ), None)
             if combo is not None:
