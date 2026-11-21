@@ -1010,7 +1010,15 @@ class MainWindow(QMainWindow):
         self.resolution_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.resolution_label.setStyleSheet(
             "color:#b9c5d3;font-size:11px;padding:2px 4px;border:0;")
-        meta_row.addWidget(self.player_meta, 1)
+        self.channel_profile_button = QPushButton("YouTube")
+        self.channel_profile_button.setFocusPolicy(Qt.StrongFocus)
+        self.channel_profile_button.setIconSize(QSize(28, 28))
+        self.channel_profile_button.setMinimumHeight(36)
+        self.channel_profile_button.setStyleSheet(
+            "QPushButton{text-align:left;padding:2px 5px;background:transparent;border:1px solid #354253;}"
+            "QPushButton:focus{background:#3a4b60;border:3px solid #ffd166;}")
+        self.channel_profile_button.clicked.connect(self.open_current_channel)
+        meta_row.addWidget(self.channel_profile_button, 1)
         meta_row.addWidget(self.player_views_label, 0)
         meta_row.addWidget(self.player_duration_label, 0)
         meta_row.addWidget(self.resolution_label, 0)
@@ -1030,8 +1038,12 @@ class MainWindow(QMainWindow):
         self.description_button = QPushButton("Description")
         self.description_button.setToolTip("Deskripsi video")
         self.description_button.clicked.connect(lambda: self.show_side_panel("description"))
+        self.description_expand_button = QPushButton("Perbesar")
+        self.description_expand_button.setToolTip("Perbesar area deskripsi dan lipat video")
+        self.description_expand_button.clicked.connect(self.toggle_description_expanded)
         side_buttons.addWidget(self.playlist_button)
         side_buttons.addWidget(self.description_button)
+        side_buttons.addWidget(self.description_expand_button)
         side_layout.addLayout(side_buttons)
         self.side_content = QScrollArea()
         self.side_content.setWidgetResizable(True)
@@ -1652,6 +1664,20 @@ class MainWindow(QMainWindow):
         channel = video.get("channel") or "YouTube"
         duration = video.get("duration") or ""
         self.current_channel = channel
+        self.current_channel_url = video.get("channel_url") or ""
+        self.current_channel_avatar = video.get("channel_avatar") or ""
+        self.current_channel_subscribers = video.get("subscribers") or ""
+        self.channel_profile_button.setText(
+            channel + (f"  ·  {self.current_channel_subscribers}" if self.current_channel_subscribers else "")
+        )
+        self.channel_profile_button.setIcon(QIcon())
+        if self.current_channel_avatar:
+            self.load_playback_channel_avatar(self.current_channel_avatar, index)
+        self.description_expanded = False
+        self.description_expand_button.setText("Perbesar")
+        self.video_frame.setMaximumHeight(16777215)
+        self.video_surface.setMinimumSize(300, 170)
+        self.side_panel.setMaximumHeight(112)
         self.current_duration_label = duration
         self.player_views_label.setText(video.get("view_count") or "")
         self.player_views_label.setVisible(bool(video.get("view_count")))
@@ -1956,6 +1982,54 @@ class MainWindow(QMainWindow):
         process.finished.connect(lambda code, _status, p=process, i=index: self.metadata_finished(p, i, code))
         process.start()
 
+    def load_playback_channel_avatar(self, url, index):
+        previous = self.channel_profile_reply
+        if previous is not None:
+            try:
+                previous.abort()
+            except RuntimeError:
+                pass
+        request = QNetworkRequest(QUrl(url))
+        request.setTransferTimeout(6000)
+        reply = self.network.get(request)
+        self.channel_profile_reply = reply
+        reply.finished.connect(lambda r=reply, i=index: self.playback_channel_avatar_loaded(r, i))
+
+    def playback_channel_avatar_loaded(self, reply, index):
+        if reply is self.channel_profile_reply:
+            self.channel_profile_reply = None
+        if index == self.current_index and reply.error() == reply.NetworkError.NoError:
+            pixmap = QPixmap()
+            if pixmap.loadFromData(reply.readAll()):
+                self.channel_profile_button.setIcon(QIcon(circular_avatar(pixmap, 28)))
+        reply.deleteLater()
+
+    def open_current_channel(self):
+        if not self.playback_queue:
+            return
+        self.player_status.setText(
+            f"Channel dipilih: {self.current_channel}. "
+            "Halaman Channel akan dibuat pada tahap berikutnya."
+        )
+
+    def toggle_description_expanded(self):
+        self.description_expanded = not self.description_expanded
+        if self.description_expanded:
+            self.show_side_panel("description")
+            self.video_frame.setMaximumHeight(155)
+            self.video_surface.setMinimumSize(260, 90)
+            self.side_panel.setMaximumHeight(260)
+            self.description_expand_button.setText("Normal")
+            self.description_expand_button.setToolTip("Kembalikan ukuran pemutar")
+            if getattr(self, "description_label", None) is not None:
+                self.description_label.setFocus(Qt.OtherFocusReason)
+        else:
+            self.video_frame.setMaximumHeight(16777215)
+            self.video_surface.setMinimumSize(300, 170)
+            self.side_panel.setMaximumHeight(112)
+            self.description_expand_button.setText("Perbesar")
+            self.description_expand_button.setToolTip("Perbesar area deskripsi dan lipat video")
+
     def metadata_finished(self, process, index, exit_code):
         if process is not self.metadata_process or index != self.current_index or exit_code != 0:
             return
@@ -1972,6 +2046,23 @@ class MainWindow(QMainWindow):
             self.playback_queue[index]["view_count"] = view_count
             self.player_views_label.setText(view_count)
             self.player_views_label.setVisible(not self.is_playback_fullscreen)
+        channel_name = data.get("channel") or data.get("uploader") or self.current_channel
+        channel_url = channel_page_url(data) or self.current_channel_url
+        channel_avatar = channel_avatar_url(data) or self.current_channel_avatar
+        subscribers = format_subscriber_count(data.get("channel_follower_count")) or self.current_channel_subscribers
+        self.current_channel = channel_name
+        self.current_channel_url = channel_url
+        self.current_channel_avatar = channel_avatar
+        self.current_channel_subscribers = subscribers
+        self.playback_queue[index].update({
+            "channel": channel_name, "channel_url": channel_url,
+            "channel_avatar": channel_avatar, "subscribers": subscribers,
+        })
+        self.channel_profile_button.setText(
+            channel_name + (f"  ·  {subscribers}" if subscribers else "")
+        )
+        if channel_avatar:
+            self.load_playback_channel_avatar(channel_avatar, index)
         description = data.get("description") or self.playback_queue[index].get("description") or "Deskripsi tidak tersedia."
         self.playback_queue[index]["description"] = description
         self.show_side_panel("description", description)
@@ -2287,6 +2378,7 @@ class MainWindow(QMainWindow):
         self.showFullScreen()
         self.player_header_widget.hide()
         self.player_meta.hide()
+        self.channel_profile_button.hide()
         self.player_views_label.hide()
         self.player_duration_label.hide()
         self.resolution_label.hide()
@@ -2318,6 +2410,7 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, lambda: self.setGeometry(geometry))
         self.player_header_widget.show()
         self.player_meta.show()
+        self.channel_profile_button.show()
         self.player_views_label.setVisible(bool(self.player_views_label.text()))
         self.player_duration_label.setVisible(bool(self.player_duration_label.text()))
         self.resolution_label.show()
@@ -2444,7 +2537,8 @@ class MainWindow(QMainWindow):
                         self.back_button, self.previous_video_button, self.rewind_button,
                         self.play_pause_button, self.fast_forward_button,
                         self.next_video_button, self.stop_button, self.fullscreen_button,
-                        self.playlist_button, self.description_button
+                        self.playlist_button, self.description_button,
+                        self.description_expand_button, self.channel_profile_button
                     ) or focus in self.playlist_items)):
                 focus.click()
                 return True
@@ -2493,7 +2587,14 @@ class MainWindow(QMainWindow):
                     if key in (Qt.Key_Up, Qt.Key_Left, Qt.Key_Right):
                         return True
                 if focus is self.player_page and key == Qt.Key_Down:
-                    self.seek_slider.setFocus(Qt.OtherFocusReason); return True
+                    self.channel_profile_button.setFocus(Qt.OtherFocusReason); return True
+                if focus is self.channel_profile_button:
+                    if key == Qt.Key_Up:
+                        self.player_page.setFocus(Qt.OtherFocusReason); return True
+                    if key == Qt.Key_Down:
+                        self.seek_slider.setFocus(Qt.OtherFocusReason); return True
+                    if key in (Qt.Key_Left, Qt.Key_Right):
+                        return True
                 if focus is self.player_page and key in (Qt.Key_Up, Qt.Key_Left, Qt.Key_Right):
                     return True
                 if key in (Qt.Key_Escape, Qt.Key_Back):
@@ -2521,7 +2622,7 @@ class MainWindow(QMainWindow):
                         if focus is self.volume_slider:
                             self.seek_slider.setFocus()
                         else:
-                            self.back_button.setFocus()
+                            self.channel_profile_button.setFocus()
                         return True
                 if focus in (self.previous_video_button, self.rewind_button,
                              self.play_pause_button, self.fast_forward_button,
@@ -2612,11 +2713,13 @@ class MainWindow(QMainWindow):
                         self.subtitle_box.setFocus(Qt.OtherFocusReason); return True
                     if key in (Qt.Key_Up, Qt.Key_Down):
                         return True
-                if focus in (self.playlist_button, self.description_button):
+                if focus in (self.playlist_button, self.description_button, self.description_expand_button):
+                    side_buttons = [self.playlist_button, self.description_button, self.description_expand_button]
+                    pos = side_buttons.index(focus)
                     if key == Qt.Key_Left:
-                        self.playlist_button.setFocus(Qt.OtherFocusReason); return True
+                        side_buttons[max(0, pos - 1)].setFocus(Qt.OtherFocusReason); return True
                     if key == Qt.Key_Right:
-                        self.description_button.setFocus(Qt.OtherFocusReason); return True
+                        side_buttons[min(len(side_buttons) - 1, pos + 1)].setFocus(Qt.OtherFocusReason); return True
                     if key == Qt.Key_Up:
                         self.subtitle_box.setFocus(Qt.OtherFocusReason); return True
                     if key == Qt.Key_Down:
@@ -2625,8 +2728,11 @@ class MainWindow(QMainWindow):
                                 self.show_side_panel("playlist")
                             if self.playlist_items:
                                 self.playlist_items[0].setFocus(Qt.OtherFocusReason)
-                        elif focus is self.description_button and getattr(self, "description_label", None) is not None:
-                            self.description_label.setFocus(Qt.OtherFocusReason)
+                        elif focus in (self.description_button, self.description_expand_button):
+                            if focus is self.description_expand_button and not self.description_expanded:
+                                self.toggle_description_expanded()
+                            if getattr(self, "description_label", None) is not None:
+                                self.description_label.setFocus(Qt.OtherFocusReason)
                         return True
                 if key == Qt.Key_Left and focus is self.subtitle_box:
                     self.quality.setFocus()
