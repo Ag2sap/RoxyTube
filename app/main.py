@@ -2642,8 +2642,14 @@ class MainWindow(QMainWindow):
 
             # TV remotes often send Key_Select rather than Return/Enter.
             # Open combo popups on the first OK; commit the highlighted row on the next.
-            if focus in (getattr(self, "quality", None), getattr(self, "subtitle_box", None)):
-                combo = focus
+            combos = (getattr(self, "quality", None), getattr(self, "subtitle_box", None))
+            combo = next((
+                candidate for candidate in combos if candidate is not None and (
+                    focus is candidate or watched is candidate
+                    or watched is candidate.view() or watched is candidate.view().viewport()
+                )
+            ), None)
+            if combo is not None:
                 if combo.view().isVisible():
                     if key in activation_keys:
                         index = combo.view().currentIndex()
@@ -2654,7 +2660,7 @@ class MainWindow(QMainWindow):
                         return True
                     if key in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right):
                         return False
-                elif key in activation_keys:
+                elif focus is combo and key in activation_keys:
                     combo.showPopup()
                     event.accept()
                     return True
