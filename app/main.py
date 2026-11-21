@@ -5,7 +5,7 @@ import json, os, shutil, sys
 from pathlib import Path
 from urllib.parse import quote_plus
 from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve, QSize, QRect
-from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QIcon, QPainterPath
+from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QIcon, QPainterPath, QFontMetrics
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDiskCache, QLocalSocket, QLocalServer
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
@@ -413,6 +413,52 @@ class TvKeyboard(QWidget):
         self.on_finish()
 
 
+class TwoLineTitleLabel(QLabel):
+    """A compact two-line title that always marks truncated text with an ellipsis."""
+
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        self.full_text = str(text or "")
+        self.setWordWrap(False)
+        self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.setMinimumWidth(0)
+        self.setMaximumHeight(38)
+        self.refresh_elided_text()
+
+    def set_full_text(self, text):
+        self.full_text = str(text or "")
+        self.refresh_elided_text()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.refresh_elided_text()
+
+    def refresh_elided_text(self):
+        width = max(1, self.contentsRect().width())
+        metrics = QFontMetrics(self.font())
+        words = self.full_text.split()
+        if not words:
+            self.setText("")
+            return
+
+        first = []
+        while words:
+            candidate = " ".join(first + [words[0]])
+            if metrics.horizontalAdvance(candidate) <= width:
+                first.append(words.pop(0))
+            elif not first:
+                first.append(metrics.elidedText(words.pop(0), Qt.ElideRight, width))
+                break
+            else:
+                break
+
+        lines = [" ".join(first)]
+        if words:
+            remainder = " ".join(words)
+            lines.append(metrics.elidedText(remainder, Qt.ElideRight, width))
+        self.setText("\n".join(lines[:2]))
+
+
 class VideoCard(QFrame):
     def __init__(self, index, title, channel, duration, view_count="", avatar_url="", parent=None):
         super().__init__(parent)
@@ -465,11 +511,8 @@ class VideoCard(QFrame):
         thumb_layout.addWidget(self.duration_label, 0, 0, Qt.AlignRight | Qt.AlignBottom)
         layout.addWidget(self.thumbnail_frame)
 
-        self.title_label = QLabel(title)
+        self.title_label = TwoLineTitleLabel(title)
         self.title_label.setObjectName("videoTitle")
-        self.title_label.setWordWrap(True)
-        self.title_label.setMinimumWidth(0)
-        self.title_label.setMaximumHeight(38)
         self.title_label.setStyleSheet("font-size:13px;font-weight:700;color:#f4f6f8;background:transparent;border:0;")
         layout.addWidget(self.title_label)
         meta_row = QHBoxLayout()
@@ -1134,6 +1177,7 @@ class MainWindow(QMainWindow):
         self.stop_button.setToolTip("Stop playback")
         self.stop_button.clicked.connect(self.stop_playback)
         self.subtitle_box = QComboBox()
+        self.subtitle_box.setFocusPolicy(Qt.StrongFocus)
         self.subtitle_box.setMinimumWidth(105)
         self.subtitle_box.addItem("Subtitle: Off", None)
         self.subtitle_box.currentIndexChanged.connect(self.select_subtitle)
@@ -1146,6 +1190,7 @@ class MainWindow(QMainWindow):
         self.fullscreen_button.setToolTip("Fullscreen playback")
         self.fullscreen_button.clicked.connect(self.toggle_playback_fullscreen)
         self.quality = QComboBox()
+        self.quality.setFocusPolicy(Qt.StrongFocus)
         self.quality.addItems(list(QUALITY_FORMATS))
         self.quality.setCurrentText("720p")
         self.quality.setMinimumWidth(68)
@@ -2593,6 +2638,36 @@ class MainWindow(QMainWindow):
                 pass
         if event.type() == QEvent.KeyPress:
             key, focus = event.key(), QApplication.focusWidget()
+            activation_keys = (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select)
+
+            # TV remotes often send Key_Select rather than Return/Enter.
+            # Open combo popups on the first OK; commit the highlighted row on the next.
+            if focus in (getattr(self, "quality", None), getattr(self, "subtitle_box", None)):
+                combo = focus
+                if combo.view().isVisible():
+                    if key in activation_keys:
+                        index = combo.view().currentIndex()
+                        if index.isValid():
+                            combo.setCurrentIndex(index.row())
+                        combo.hidePopup()
+                        event.accept()
+                        return True
+                    if key in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right):
+                        return False
+                elif key in activation_keys:
+                    combo.showPopup()
+                    event.accept()
+                    return True
+
+            # Window controls live on the search page, outside the playback-only
+            # activation list below, so activate them explicitly with the remote OK.
+            if key in activation_keys and focus in (
+                getattr(self, "minimize_button", None), getattr(self, "close_button", None)
+            ):
+                focus.click()
+                event.accept()
+                return True
+
             if key == Qt.Key_Space and isinstance(watched, QPushButton):
                 return True
             if (self.pages.currentWidget() == self.player_page
