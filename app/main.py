@@ -632,6 +632,8 @@ class MainWindow(QMainWindow):
         self.avatar_queue = []
         self.avatar_active = 0
         self.avatar_replies = set()
+        self.channel_avatar_lookup_queue = []
+        self.channel_avatar_lookup_process = None
         self.search_kind = "videos"
         self.channel_profile_reply = None
         self.description_expanded = False
@@ -1247,6 +1249,11 @@ class MainWindow(QMainWindow):
         self.thumbnail_cards.clear()
         self.thumbnail_queue.clear()
         self.avatar_queue.clear()
+        self.channel_avatar_lookup_queue.clear()
+        lookup = self.channel_avatar_lookup_process
+        self.channel_avatar_lookup_process = None
+        if self.process_is_running(lookup):
+            lookup.kill()
 
     def set_active_nav(self, mode):
         for button, button_mode in zip(self.nav_buttons, self.nav_modes):
@@ -1495,6 +1502,8 @@ class MainWindow(QMainWindow):
                 self.thumbnail_queue.append((result["thumbnail"], card))
             if result.get("channel_avatar"):
                 self.avatar_queue.append((result["channel_avatar"], card))
+            elif result.get("channel_url"):
+                self.channel_avatar_lookup_queue.append((result["channel_url"], card))
         self.page_label.setText(f"{self.current_page + 1} / {total_pages}")
         self.prev_page_button.setEnabled(self.current_page > 0)
         self.next_page_button.setEnabled(self.current_page + 1 < total_pages)
@@ -1502,6 +1511,7 @@ class MainWindow(QMainWindow):
         self.refresh_card_columns()
         self.load_next_thumbnail()
         self.load_next_avatar()
+        self.load_next_channel_avatar_lookup()
         if self.cards:
             self.cards[0].setFocus()
 
@@ -1575,6 +1585,47 @@ class MainWindow(QMainWindow):
             self.avatar_active += 1
             self.avatar_replies.add(reply)
             reply.finished.connect(lambda r=reply, c=card: self.avatar_loaded(r, c))
+
+    def load_next_channel_avatar_lookup(self):
+        if self.process_is_running(self.channel_avatar_lookup_process):
+            return
+        while self.channel_avatar_lookup_queue:
+            url, card = self.channel_avatar_lookup_queue.pop(0)
+            if card not in self.cards:
+                continue
+            process = QProcess(self)
+            self.channel_avatar_lookup_process = process
+            process.setProgram(YTDLP)
+            process.setArguments([
+                "--no-warnings", "--skip-download", "--flat-playlist",
+                "--playlist-items", "1", "--dump-single-json", url,
+            ])
+            process.finished.connect(
+                lambda code, _status, p=process, c=card: self.channel_avatar_lookup_finished(p, c, code)
+            )
+            process.start()
+            return
+
+    def channel_avatar_lookup_finished(self, process, card, exit_code):
+        if process is not self.channel_avatar_lookup_process:
+            return
+        self.channel_avatar_lookup_process = None
+        if exit_code == 0 and card in self.cards:
+            try:
+                data = json.loads(bytes(process.readAllStandardOutput()).decode("utf-8", "replace"))
+                avatar = channel_avatar_url(data)
+                if not avatar:
+                    entries = data.get("entries") or []
+                    if entries and isinstance(entries[0], dict):
+                        avatar = channel_avatar_url(entries[0])
+                if avatar:
+                    card.channel_avatar_url = avatar
+                    self.avatar_queue.append((avatar, card))
+                    self.load_next_avatar()
+            except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+                pass
+        process.deleteLater()
+        self.load_next_channel_avatar_lookup()
 
     def avatar_loaded(self, reply, card):
         self.avatar_active = max(0, self.avatar_active - 1)
@@ -3039,7 +3090,8 @@ class MainWindow(QMainWindow):
                 return
         self.mini_title_timer.stop()
         self.fullscreen_hide_timer.stop()
-        for process in (self.search_process, self.player_process, self.metadata_process):
+        for process in (self.search_process, self.player_process, self.metadata_process,
+                        self.channel_avatar_lookup_process):
             if self.process_is_running(process):
                 process.terminate()
                 if not process.waitForFinished(500):
