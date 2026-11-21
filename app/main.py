@@ -1234,6 +1234,7 @@ class MainWindow(QMainWindow):
         self.cards.clear()
         self.thumbnail_cards.clear()
         self.thumbnail_queue.clear()
+        self.avatar_queue.clear()
 
     def set_active_nav(self, mode):
         for button, button_mode in zip(self.nav_buttons, self.nav_modes):
@@ -1264,9 +1265,19 @@ class MainWindow(QMainWindow):
         else:
             self.pages.setCurrentWidget(self.search_page)
             if mode == "search":
+                self.search_kind = "videos"
+                self.query.setPlaceholderText("Cari video atau tempel URL YouTube…")
                 self.keyboard_button.setFocus(Qt.OtherFocusReason)
                 self.status.setText("Pilih KEY untuk membuka keyboard, atau pilih kolom teks untuk mengetik.")
+            elif mode == "channels":
+                self.search_kind = "channels"
+                self.query.setPlaceholderText("Cari nama channel YouTube…")
+                self.results_heading.setText("PENCARIAN CHANNEL")
+                self.status.setText("Masukkan nama channel, lalu tekan Cari.")
+                self.keyboard_button.setFocus(Qt.OtherFocusReason)
             elif mode in ("home", "trending"):
+                self.search_kind = "videos"
+                self.query.setPlaceholderText("Cari video atau tempel URL YouTube…")
                 self.load_feed(mode)
             else:
                 self.results_heading.setText(mode.upper())
@@ -1289,6 +1300,7 @@ class MainWindow(QMainWindow):
         if self.process_is_running(self.search_process):
             self.search_process.kill()
         self.set_active_nav(mode)
+        self.search_kind = "videos"
         self.clear_cards()
         self.results = []
         self.current_page = 0
@@ -1313,7 +1325,8 @@ class MainWindow(QMainWindow):
         process.start()
 
     def search(self):
-        self.set_active_nav("search")
+        mode = self.feed_mode
+        self.set_active_nav(mode if mode in ("search", "channels") else "search")
         self.collapse_sidebar()
         term = self.query.text().strip()
         if not term:
@@ -1329,13 +1342,24 @@ class MainWindow(QMainWindow):
         self.clear_cards()
         self.results = []
         self.current_page = 0
-        self.status.setText("Mencari video YouTube…")
-        self.results_heading.setText("HASIL PENCARIAN")
-        target = term if term.startswith(("http://", "https://")) else f"ytsearch60:{term}"
+        if self.search_kind == "channels":
+            self.status.setText("Mencari channel YouTube…")
+            self.results_heading.setText("HASIL PENCARIAN CHANNEL")
+            target = (
+                "https://www.youtube.com/results?search_query="
+                + quote_plus(term) + "&sp=EgIQAg%253D%253D"
+            )
+            arguments = ["--no-warnings", "--flat-playlist", "--playlist-end", "40",
+                         "--dump-single-json", target]
+        else:
+            self.status.setText("Mencari video YouTube…")
+            self.results_heading.setText("HASIL PENCARIAN VIDEO")
+            target = term if term.startswith(("http://", "https://")) else f"ytsearch60:{term}"
+            arguments = ["--no-warnings", "--flat-playlist", "--dump-single-json", target]
         process = QProcess(self)
         self.search_process = process
         process.setProgram(YTDLP)
-        process.setArguments(["--no-warnings", "--flat-playlist", "--dump-single-json", target])
+        process.setArguments(arguments)
         process.finished.connect(lambda code, status, p=process: self.search_finished(p, code, status))
         process.errorOccurred.connect(lambda _err, p=process: self.search_error(p))
         process.start()
@@ -1356,16 +1380,47 @@ class MainWindow(QMainWindow):
                 self.status.setText("Beranda belum mendapat hasil pencarian publik. Periksa koneksi atau yt-dlp.")
             elif self.feed_mode == "trending":
                 self.status.setText("Pencarian video populer Indonesia gagal. Periksa koneksi atau yt-dlp.")
+            elif self.search_kind == "channels":
+                self.status.setText("Pencarian channel gagal. Periksa koneksi atau pembaruan yt-dlp.")
+                if err.strip():
+                    QMessageBox.warning(self, APP_NAME, err[-1200:])
             else:
                 self.status.setText("Pencarian gagal. Periksa koneksi / yt-dlp.")
                 if err.strip():
                     QMessageBox.warning(self, APP_NAME, err[-1200:])
-            self.search_button.setEnabled(True)
             return
         try:
             data = json.loads(raw)
-            for entry in (data.get("entries") or [data]):
-                if not entry:
+            entries = data.get("entries") or [data]
+            if self.search_kind == "channels":
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    url = channel_page_url(entry)
+                    if not url:
+                        continue
+                    name = entry.get("channel") or entry.get("uploader") or entry.get("title")
+                    if not name:
+                        continue
+                    self.results.append({
+                        "kind": "channel", "url": url, "title": name,
+                        "channel": name,
+                        "subscribers": format_subscriber_count(entry.get("channel_follower_count")),
+                        "description": entry.get("description") or "",
+                        "channel_avatar": channel_avatar_url(entry),
+                    })
+                if not self.results:
+                    self.status.setText("Tidak ada channel yang ditemukan. Coba kata kunci lain.")
+                    return
+                self.render_page()
+                self.results_heading.setText(f"HASIL CHANNEL  •  {len(self.results)} ditemukan")
+                self.status.setText(
+                    f"{len(self.results)} channel ditemukan. Halaman channel akan disiapkan pada tahap berikutnya."
+                )
+                return
+
+            for entry in entries:
+                if not isinstance(entry, dict):
                     continue
                 url = video_url(entry)
                 if not url:
@@ -1373,8 +1428,12 @@ class MainWindow(QMainWindow):
                 duration = entry.get("duration")
                 duration_text = f"{int(duration)//60}:{int(duration)%60:02d}" if duration else ""
                 self.results.append({
-                    "url": url, "title": entry.get("title") or "Video tanpa judul",
+                    "kind": "video", "url": url, "title": entry.get("title") or "Video tanpa judul",
                     "channel": entry.get("channel") or entry.get("uploader") or "YouTube",
+                    "channel_id": entry.get("channel_id") or "",
+                    "channel_url": channel_page_url(entry),
+                    "channel_avatar": channel_avatar_url(entry),
+                    "subscribers": format_subscriber_count(entry.get("channel_follower_count")),
                     "view_count": format_view_count(entry.get("view_count")),
                     "thumbnail": thumbnail_url(entry), "duration": duration_text,
                     "duration_seconds": float(duration or 0),
@@ -1401,33 +1460,75 @@ class MainWindow(QMainWindow):
             self.status.setText(f"Format hasil tidak dikenali: {exc}")
 
     def render_page(self):
+        if self.search_kind == "channels":
+            self.render_channel_page()
+            return
         self.clear_cards()
         total_pages = max(1, (len(self.results) + self.page_size - 1) // self.page_size)
         self.current_page = max(0, min(self.current_page, total_pages - 1))
         start = self.current_page * self.page_size
         end = min(len(self.results), start + self.page_size)
-        # Keep Recommended, Trending, and Search visually consistent.
         columns = 2
         for idx in range(start, end):
             result = self.results[idx]
             card = VideoCard(idx, result["title"], result["channel"], result["duration"],
-                             result.get("view_count", ""), self.cards_host)
+                             result.get("view_count", ""), result.get("channel_avatar", ""), self.cards_host)
             card.setMinimumHeight(250)
             card.on_activate = self.play_index
             card.installEventFilter(self)
             self.cards.append(card)
             self.cards_grid.addWidget(card, (idx-start)//columns, (idx-start)%columns)
-            if result["thumbnail"]:
+            if result.get("thumbnail"):
                 self.thumbnail_cards[result["thumbnail"]] = card
                 self.thumbnail_queue.append((result["thumbnail"], card))
+            if result.get("channel_avatar"):
+                self.avatar_queue.append((result["channel_avatar"], card))
         self.page_label.setText(f"{self.current_page + 1} / {total_pages}")
         self.prev_page_button.setEnabled(self.current_page > 0)
         self.next_page_button.setEnabled(self.current_page + 1 < total_pages)
         self.results_heading.setText(f"HASIL VIDEO  •  {start + 1 if end else 0}–{end} dari {len(self.results)}")
         self.refresh_card_columns()
         self.load_next_thumbnail()
+        self.load_next_avatar()
         if self.cards:
             self.cards[0].setFocus()
+
+    def render_channel_page(self):
+        self.clear_cards()
+        self.thumbnail_queue.clear()
+        total_pages = max(1, (len(self.results) + self.page_size - 1) // self.page_size)
+        self.current_page = max(0, min(self.current_page, total_pages - 1))
+        start = self.current_page * self.page_size
+        end = min(len(self.results), start + self.page_size)
+        for idx in range(start, end):
+            result = self.results[idx]
+            card = ChannelCard(
+                idx, result.get("title", ""), result.get("subscribers", ""),
+                result.get("description", ""), result.get("channel_avatar", ""), self.cards_host
+            )
+            card.on_activate = self.open_channel_preview
+            card.installEventFilter(self)
+            self.cards.append(card)
+            self.cards_grid.addWidget(card, (idx-start)//2, (idx-start)%2)
+            if result.get("channel_avatar"):
+                self.avatar_queue.append((result["channel_avatar"], card))
+        self.page_label.setText(f"{self.current_page + 1} / {total_pages}")
+        self.prev_page_button.setEnabled(self.current_page > 0)
+        self.next_page_button.setEnabled(self.current_page + 1 < total_pages)
+        self.results_heading.setText(f"HASIL CHANNEL  •  {start + 1 if end else 0}–{end} dari {len(self.results)}")
+        self.refresh_card_columns()
+        self.load_next_avatar()
+        if self.cards:
+            self.cards[0].setFocus()
+
+    def open_channel_preview(self, index):
+        if not 0 <= int(index) < len(self.results):
+            return
+        channel = self.results[int(index)]
+        self.status.setText(
+            f"Channel dipilih: {channel.get('title', 'Channel')}. "
+            "Halaman Channel akan ditambahkan pada tahap berikutnya."
+        )
 
     def load_next_thumbnail(self):
         while self.thumbnail_active < 3 and self.thumbnail_queue:
@@ -1450,6 +1551,28 @@ class MainWindow(QMainWindow):
                 card.set_thumbnail(pixmap)
         reply.deleteLater()
         self.load_next_thumbnail()
+
+    def load_next_avatar(self):
+        while self.avatar_active < 2 and self.avatar_queue:
+            url, card = self.avatar_queue.pop(0)
+            if card not in self.cards:
+                continue
+            request = QNetworkRequest(QUrl(url))
+            request.setTransferTimeout(6000)
+            reply = self.network.get(request)
+            self.avatar_active += 1
+            self.avatar_replies.add(reply)
+            reply.finished.connect(lambda r=reply, c=card: self.avatar_loaded(r, c))
+
+    def avatar_loaded(self, reply, card):
+        self.avatar_active = max(0, self.avatar_active - 1)
+        self.avatar_replies.discard(reply)
+        if card in self.cards and reply.error() == reply.NetworkError.NoError:
+            pixmap = QPixmap()
+            if pixmap.loadFromData(reply.readAll()):
+                card.set_channel_avatar(pixmap)
+        reply.deleteLater()
+        self.load_next_avatar()
 
     def change_page_size(self, value):
         self.page_size = int(value)
