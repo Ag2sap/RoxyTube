@@ -12,6 +12,10 @@ A lightweight YouTube TV-style frontend for HG680P / Armbian Noble (ARM64).
 - Integrated on-screen keyboard slides down below the search row and pushes the results area down; SELESAI or Back slides it away.
 - Android-TV-inspired keyboard rows with letters, digits, persistent CAPS, one-shot SHIFT, symbol page, comma, period, punctuation, space, backspace, and clear.
 - Search results shown as large 16:9 thumbnail cards in a two-column grid on 4:3 layouts, with title, channel/artist and duration.
+- Video cards can show the channel avatar as a small overlay at the lower-left of the thumbnail; missing avatars are resolved lazily from channel metadata, one channel lookup at a time.
+- A dedicated **Channel** sidebar mode searches YouTube channel results only and shows channel cards with avatar, name, subscriber count and description.
+- The playback details row includes a D-pad-focusable channel profile control. The description panel can be expanded while the video surface folds to a compact size; the description remains scrollable.
+- Channel-page navigation is prepared as an entry point but the full channel page and its tabs are intentionally deferred to the next development stage.
 - D-pad navigation across search controls, keyboard and thumbnail cards, including scrolling the results viewport before focus moves back to the header.
 - PlasmaTube-inspired watch page with embedded MPV, a timeline directly below the video, 10-second rewind/forward, playback controls, and a lower queue/description panel.
 - D-pad navigation across the timeline, playback controls, queue items, and scrollable description.
