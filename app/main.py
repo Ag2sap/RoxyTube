@@ -1608,6 +1608,7 @@ class MainWindow(QMainWindow):
 
     def channel_avatar_lookup_finished(self, process, card, exit_code):
         if process is not self.channel_avatar_lookup_process:
+            process.deleteLater()
             return
         self.channel_avatar_lookup_process = None
         if exit_code == 0 and card in self.cards:
