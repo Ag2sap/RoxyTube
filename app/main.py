@@ -1021,6 +1021,8 @@ class MainWindow(QMainWindow):
             "QPushButton:focus{background:#3a4b60;border:3px solid #ffd166;}")
         self.channel_profile_button.clicked.connect(self.open_current_channel)
         meta_row.addWidget(self.channel_profile_button, 1)
+        meta_row.addWidget(self.player_meta, 0)
+        self.player_meta.hide()
         meta_row.addWidget(self.player_views_label, 0)
         meta_row.addWidget(self.player_duration_label, 0)
         meta_row.addWidget(self.resolution_label, 0)
@@ -2470,7 +2472,7 @@ class MainWindow(QMainWindow):
                 geometry = self._restore_geometry
                 QTimer.singleShot(0, lambda: self.setGeometry(geometry))
         self.player_header_widget.show()
-        self.player_meta.show()
+        self.player_meta.hide()
         self.channel_profile_button.show()
         self.player_views_label.setVisible(bool(self.player_views_label.text()))
         self.player_duration_label.setVisible(bool(self.player_duration_label.text()))
