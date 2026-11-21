@@ -1733,6 +1733,7 @@ class MainWindow(QMainWindow):
         self.channel_profile_button.setText(
             channel + (f"  ·  {self.current_channel_subscribers}" if self.current_channel_subscribers else "")
         )
+        self.channel_profile_button.setEnabled(bool(self.current_channel_url))
         self.channel_profile_button.setIcon(QIcon())
         if self.current_channel_avatar:
             self.load_playback_channel_avatar(self.current_channel_avatar, index)
@@ -2124,6 +2125,7 @@ class MainWindow(QMainWindow):
         self.channel_profile_button.setText(
             channel_name + (f"  ·  {subscribers}" if subscribers else "")
         )
+        self.channel_profile_button.setEnabled(bool(channel_url))
         if channel_avatar:
             self.load_playback_channel_avatar(channel_avatar, index)
         description = data.get("description") or self.playback_queue[index].get("description") or "Deskripsi tidak tersedia."
