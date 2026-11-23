@@ -2045,9 +2045,11 @@ class MainWindow(QMainWindow):
             self.normalGeometry() if self.isMaximized() else self.geometry()
         )
         self.is_playback_safe_area = True
-        self._activation_state = "safe_area"
         self.setWindowState(Qt.WindowNoState)
         self.show()
+        # A state-change event from a previously maximized window must not
+        # replace the Safe Area restore mode.
+        self._activation_state = "safe_area"
         QTimer.singleShot(0, self.apply_playback_safe_area_geometry)
         self.player_header_widget.hide()
         self.player_meta.hide()
@@ -2070,9 +2072,9 @@ class MainWindow(QMainWindow):
         self.safe_area_controls_visible = True
         self.setMinimumSize(self._normal_minimum_size)
         if self._playback_return_window_state == "maximized":
-            self._activation_state = "maximized"
             self.setWindowState(Qt.WindowMaximized)
             self.showMaximized()
+            self._activation_state = "maximized"
         else:
             self._activation_state = "normal"
             self.setWindowState(Qt.WindowNoState)
@@ -2650,6 +2652,7 @@ class MainWindow(QMainWindow):
         if mode == "safe_area":
             self.setWindowState(Qt.WindowNoState)
             self.show()
+            self._activation_state = "safe_area"
             QTimer.singleShot(0, self.apply_playback_safe_area_geometry)
         elif mode == "maximized":
             self.setWindowState(Qt.WindowMaximized)
