@@ -480,6 +480,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_NAME)
         self.resize(700, 525)
         self.setMinimumSize(560, 420)
+        self._normal_minimum_size = self.minimumSize()
         self.setMaximumSize(900, 675)
         self.settings_data = load_app_settings()
         self.results, self.cards = [], []
@@ -490,7 +491,7 @@ class MainWindow(QMainWindow):
         self.page_size = self.settings_data["page_size"]
         self._activation_state = "normal"
         self._restore_geometry = None
-        self._playback_return_state = "normal"
+        self._playback_return_window_state = "normal"
         self.thumbnail_queue = []
         self.thumbnail_active = 0
         self.thumbnail_cards = {}
@@ -521,11 +522,11 @@ class MainWindow(QMainWindow):
         self.selected_subtitle_track = None
         self.subtitle_applied_process = None
         self.subtitle_applied_track = None
-        self.is_playback_fullscreen = False
-        self.fullscreen_controls_visible = False
-        self.fullscreen_hide_timer = QTimer(self)
-        self.fullscreen_hide_timer.setSingleShot(True)
-        self.fullscreen_hide_timer.timeout.connect(self.hide_fullscreen_controls)
+        self.is_playback_safe_area = False
+        self.safe_area_controls_visible = False
+        self.safe_area_hide_timer = QTimer(self)
+        self.safe_area_hide_timer.setSingleShot(True)
+        self.safe_area_hide_timer.timeout.connect(self.hide_safe_area_controls)
         self.fallback_qualities = []
         self.background_playback = False
         self.playlist_items = []
@@ -980,14 +981,14 @@ class MainWindow(QMainWindow):
         self.subtitle_box.setMinimumWidth(105)
         self.subtitle_box.addItem("Subtitle: Off", None)
         self.subtitle_box.currentIndexChanged.connect(self.select_subtitle)
-        self.fullscreen_button = QPushButton()
-        self.fullscreen_button.setIcon(monochrome_icon(
+        self.safe_area_button = QPushButton()
+        self.safe_area_button.setIcon(monochrome_icon(
             self.style().standardIcon(QStyle.SP_TitleBarMaxButton), QSize(17, 17)))
-        self.fullscreen_button.setFixedSize(32, 30)
-        self.fullscreen_button.setIconSize(QSize(17, 17))
-        self.fullscreen_button.setStyleSheet("QPushButton{padding:0;border-radius:5px;}")
-        self.fullscreen_button.setToolTip("Fullscreen playback")
-        self.fullscreen_button.clicked.connect(self.toggle_playback_fullscreen)
+        self.safe_area_button.setFixedSize(32, 30)
+        self.safe_area_button.setIconSize(QSize(17, 17))
+        self.safe_area_button.setStyleSheet("QPushButton{padding:0;border-radius:5px;}")
+        self.safe_area_button.setToolTip("Perluas ke Safe Area")
+        self.safe_area_button.clicked.connect(self.toggle_playback_safe_area)
         self.quality = QComboBox()
         self.quality.addItems(list(QUALITY_FORMATS))
         self.quality.setCurrentText("720p")
@@ -1000,7 +1001,7 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.fast_forward_button)
         controls.addWidget(self.next_video_button)
         controls.addWidget(self.stop_button)
-        controls.addWidget(self.fullscreen_button)
+        controls.addWidget(self.safe_area_button)
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(self.settings_data["volume"])
@@ -1479,7 +1480,7 @@ class MainWindow(QMainWindow):
             self.player_status.setText("Mengambil stream video…")
             self.set_playback_controls_enabled(True)
             self.set_mini_controls_enabled(True)
-            if self.pages.currentWidget() == self.player_page and not self.is_playback_fullscreen:
+            if self.pages.currentWidget() == self.player_page and not self.is_playback_safe_area:
                 QTimer.singleShot(0, lambda: self.play_pause_button.setFocus(Qt.OtherFocusReason)
                                   if self.process_is_running(self.player_process) else None)
             self.mpv_event_attempts = 0
@@ -1707,7 +1708,7 @@ class MainWindow(QMainWindow):
         if view_count:
             self.playback_queue[index]["view_count"] = view_count
             self.player_views_label.setText(view_count)
-            self.player_views_label.setVisible(not self.is_playback_fullscreen)
+            self.player_views_label.setVisible(not self.is_playback_safe_area)
         description = data.get("description") or self.playback_queue[index].get("description") or "Deskripsi tidak tersedia."
         self.playback_queue[index]["description"] = description
         self.show_side_panel("description", description)
@@ -1830,7 +1831,7 @@ class MainWindow(QMainWindow):
     def set_playback_controls_enabled(self, enabled):
         for widget in (self.rewind_button, self.play_pause_button, self.fast_forward_button,
                        self.seek_slider, self.volume_slider, self.quality, self.subtitle_box,
-                       self.fullscreen_button):
+                       self.safe_area_button):
             widget.setEnabled(bool(enabled))
         self.previous_video_button.setEnabled(bool(enabled) and self.current_index > 0)
         self.next_video_button.setEnabled(
@@ -1963,8 +1964,8 @@ class MainWindow(QMainWindow):
                 item.widget().deleteLater()
 
     def stop_playback(self):
-        if self.is_playback_fullscreen:
-            self.exit_playback_fullscreen()
+        if self.is_playback_safe_area:
+            self.exit_playback_safe_area()
         self.manual_stop = True
         self.set_mini_controls_enabled(False)
         self.background_playback = False
@@ -2006,21 +2007,48 @@ class MainWindow(QMainWindow):
         else:
             self.keyboard_button.setFocus()
 
-    def toggle_playback_fullscreen(self):
-        if self.is_playback_fullscreen:
-            self.exit_playback_fullscreen()
+    def playback_safe_area_geometry(self):
+        """Return the configured Safe Area rectangle in screen coordinates."""
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return QRect(0, 0, self.width(), self.height())
+        bounds = screen.geometry()
+        margins = self.safe_margins
+        left = round(bounds.width() * margins["margin_left"] / 100)
+        right = round(bounds.width() * margins["margin_right"] / 100)
+        top = round(bounds.height() * margins["margin_top"] / 100)
+        bottom = round(bounds.height() * margins["margin_bottom"] / 100)
+        return QRect(
+            bounds.x() + left,
+            bounds.y() + top,
+            max(1, bounds.width() - left - right),
+            max(1, bounds.height() - top - bottom),
+        )
+
+    def apply_playback_safe_area_geometry(self):
+        """Expand the normal frameless window into the configured Safe Area."""
+        # Safe Area settings may reduce the rectangle below the Home window's
+        # minimum size, so relax that constraint only while playback is expanded.
+        self.setMinimumSize(1, 1)
+        self.setWindowState(Qt.WindowNoState)
+        self.setGeometry(self.playback_safe_area_geometry())
+
+    def toggle_playback_safe_area(self):
+        if self.is_playback_safe_area:
+            self.exit_playback_safe_area()
             return
-        if self.isFullScreen():
-            self._playback_return_state = "fullscreen"
-        elif self.isMaximized():
-            self._playback_return_state = "maximized"
-        else:
-            self._playback_return_state = "normal"
-        # Preserve the windowed geometry before Qt replaces it with fullscreen geometry.
-        # Capture the actual pre-fullscreen rectangle; normalGeometry() may be stale.
-        self._restore_geometry = self.geometry()
-        self.is_playback_fullscreen = True
-        self.showFullScreen()
+        self._playback_return_window_state = (
+            "maximized" if self.isMaximized() else "normal"
+        )
+        # Preserve the actual pre-expansion rectangle; normalGeometry() can be stale.
+        self._restore_geometry = (
+            self.normalGeometry() if self.isMaximized() else self.geometry()
+        )
+        self.is_playback_safe_area = True
+        self._activation_state = "safe_area"
+        self.setWindowState(Qt.WindowNoState)
+        self.show()
+        QTimer.singleShot(0, self.apply_playback_safe_area_geometry)
         self.player_header_widget.hide()
         self.player_meta.hide()
         self.player_views_label.hide()
@@ -2030,23 +2058,23 @@ class MainWindow(QMainWindow):
         self.player_status.hide()
         self.timeline_widget.hide()
         self.controls_widget.hide()
-        self.fullscreen_button.setIcon(monochrome_icon(
+        self.safe_area_button.setIcon(monochrome_icon(
             self.style().standardIcon(QStyle.SP_TitleBarNormalButton), QSize(17, 17)))
-        self.fullscreen_button.setToolTip("Kembali ke tampilan normal")
-        self.fullscreen_controls_visible = False
+        self.safe_area_button.setToolTip("Kembali ke jendela normal")
+        self.safe_area_controls_visible = False
         self.player_page.setFocus()
 
-    def exit_playback_fullscreen(self):
-        self.fullscreen_hide_timer.stop()
-        self.is_playback_fullscreen = False
-        self.fullscreen_controls_visible = True
-        if self._playback_return_state == "fullscreen":
-            self.setWindowState(Qt.WindowFullScreen)
-            self.showFullScreen()
-        elif self._playback_return_state == "maximized":
+    def exit_playback_safe_area(self):
+        self.safe_area_hide_timer.stop()
+        self.is_playback_safe_area = False
+        self.safe_area_controls_visible = True
+        self.setMinimumSize(self._normal_minimum_size)
+        if self._playback_return_window_state == "maximized":
+            self._activation_state = "maximized"
             self.setWindowState(Qt.WindowMaximized)
             self.showMaximized()
         else:
+            self._activation_state = "normal"
             self.setWindowState(Qt.WindowNoState)
             self.show()
             if self._restore_geometry is not None and self._restore_geometry.isValid():
@@ -2061,29 +2089,29 @@ class MainWindow(QMainWindow):
         self.player_status.show()
         self.timeline_widget.show()
         self.controls_widget.show()
-        self.fullscreen_button.setIcon(monochrome_icon(
+        self.safe_area_button.setIcon(monochrome_icon(
             self.style().standardIcon(QStyle.SP_TitleBarMaxButton), QSize(17, 17)))
-        self.fullscreen_button.setToolTip("Fullscreen playback")
+        self.safe_area_button.setToolTip("Perluas ke Safe Area")
         self.play_pause_button.setFocus(Qt.OtherFocusReason)
 
-    def show_fullscreen_controls(self, focus_slider=False):
-        if not self.is_playback_fullscreen:
+    def show_safe_area_controls(self, focus_slider=False):
+        if not self.is_playback_safe_area:
             return
         self.timeline_widget.show()
         self.controls_widget.show()
-        self.fullscreen_controls_visible = True
+        self.safe_area_controls_visible = True
         if focus_slider:
             self.seek_slider.setFocus(Qt.OtherFocusReason)
-            self.fullscreen_hide_timer.stop()
+            self.safe_area_hide_timer.stop()
         else:
-            self.fullscreen_hide_timer.start(1000)
+            self.safe_area_hide_timer.start(1000)
 
-    def hide_fullscreen_controls(self):
-        if not self.is_playback_fullscreen:
+    def hide_safe_area_controls(self):
+        if not self.is_playback_safe_area:
             return
         self.timeline_widget.hide()
         self.controls_widget.hide()
-        self.fullscreen_controls_visible = False
+        self.safe_area_controls_visible = False
         self.player_page.setFocus(Qt.OtherFocusReason)
 
     def set_mini_title(self, title):
@@ -2160,13 +2188,13 @@ class MainWindow(QMainWindow):
         if event.type() == QEvent.FocusIn and watched in getattr(self, "playlist_items", ()):
             QTimer.singleShot(0, lambda item=watched:
                               self.side_content.ensureWidgetVisible(item, 0, 8))
-        if self.is_playback_fullscreen and event.type() == QEvent.MouseMove:
+        if self.is_playback_safe_area and event.type() == QEvent.MouseMove:
             try:
                 point = watched.mapTo(self.player_page, event.position().toPoint())
                 if point.y() >= int(self.player_page.height() * 0.68):
-                    self.show_fullscreen_controls()
-                elif self.fullscreen_controls_visible:
-                    self.fullscreen_hide_timer.start(1000)
+                    self.show_safe_area_controls()
+                elif self.safe_area_controls_visible:
+                    self.safe_area_hide_timer.start(1000)
             except (AttributeError, RuntimeError, TypeError):
                 pass
         if event.type() == QEvent.KeyPress:
@@ -2179,32 +2207,32 @@ class MainWindow(QMainWindow):
                     and (focus in (
                         self.back_button, self.previous_video_button, self.rewind_button,
                         self.play_pause_button, self.fast_forward_button,
-                        self.next_video_button, self.stop_button, self.fullscreen_button,
+                        self.next_video_button, self.stop_button, self.safe_area_button,
                         self.playlist_button, self.description_button
                     ) or focus in self.playlist_items)):
                 focus.click()
                 return True
-            if self.is_playback_fullscreen:
+            if self.is_playback_safe_area:
                 if key in (Qt.Key_Escape, Qt.Key_Back):
-                    self.exit_playback_fullscreen()
+                    self.exit_playback_safe_area()
                     return True
-                if self.fullscreen_controls_visible:
-                    fullscreen_focus_targets = (
+                if self.safe_area_controls_visible:
+                    safe_area_focus_targets = (
                         self.seek_slider, self.previous_video_button, self.rewind_button,
                         self.play_pause_button, self.fast_forward_button, self.next_video_button,
-                        self.stop_button, self.fullscreen_button, self.volume_slider,
+                        self.stop_button, self.safe_area_button, self.volume_slider,
                         self.quality, self.subtitle_box
                     )
-                    if focus in fullscreen_focus_targets:
+                    if focus in safe_area_focus_targets:
                         # Keep controls available while the remote is navigating them.
-                        self.fullscreen_hide_timer.stop()
+                        self.safe_area_hide_timer.stop()
                     elif focus is self.player_page:
-                        self.fullscreen_hide_timer.start(1000)
+                        self.safe_area_hide_timer.start(1000)
                     if key == Qt.Key_Down and focus is self.player_page:
                         self.seek_slider.setFocus(Qt.OtherFocusReason)
                         return True
                     if key == Qt.Key_Up and focus is self.seek_slider:
-                        self.hide_fullscreen_controls()
+                        self.hide_safe_area_controls()
                         return True
                     if key == Qt.Key_Down and focus is self.seek_slider:
                         self.previous_video_button.setFocus(Qt.OtherFocusReason)
@@ -2212,12 +2240,12 @@ class MainWindow(QMainWindow):
                     if key == Qt.Key_Down and focus in (
                         self.previous_video_button, self.rewind_button, self.play_pause_button,
                         self.fast_forward_button, self.next_video_button, self.stop_button,
-                        self.fullscreen_button, self.quality, self.subtitle_box
+                        self.safe_area_button, self.quality, self.subtitle_box
                     ):
-                        # The side panel is hidden in fullscreen; don't send focus to Queue.
+                        # The side panel is hidden in Safe Area playback; do not send focus to Queue.
                         return True
                 elif key == Qt.Key_Down:
-                    self.show_fullscreen_controls(focus_slider=True)
+                    self.show_safe_area_controls(focus_slider=True)
                     return True
                 if focus is self.player_page and key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                     self.toggle_play_pause()
@@ -2261,11 +2289,11 @@ class MainWindow(QMainWindow):
                         return True
                 if focus in (self.previous_video_button, self.rewind_button,
                              self.play_pause_button, self.fast_forward_button,
-                             self.next_video_button, self.stop_button, self.fullscreen_button):
+                             self.next_video_button, self.stop_button, self.safe_area_button):
                     row = [self.previous_video_button, self.rewind_button,
                            self.play_pause_button, self.fast_forward_button,
                            self.next_video_button, self.stop_button,
-                           self.fullscreen_button, self.volume_slider]
+                           self.safe_area_button, self.volume_slider]
                     pos = row.index(focus)
                     if key == Qt.Key_Left:
                         if pos > 0:
@@ -2281,7 +2309,7 @@ class MainWindow(QMainWindow):
                         self.playlist_button.setFocus(); return True
                 if focus is self.quality:
                     if key == Qt.Key_Left:
-                        self.fullscreen_button.setFocus(); return True
+                        self.safe_area_button.setFocus(); return True
                     if key == Qt.Key_Right:
                         self.subtitle_box.setFocus(); return True
                     if key == Qt.Key_Up:
@@ -2297,7 +2325,7 @@ class MainWindow(QMainWindow):
                         self.seek_slider.setFocus(); return True
                     if key == Qt.Key_Down:
                         self.playlist_button.setFocus(); return True
-                if focus is self.fullscreen_button:
+                if focus is self.safe_area_button:
                     if key == Qt.Key_Up:
                         self.seek_slider.setFocus(); return True
                     if key == Qt.Key_Down:
@@ -2371,7 +2399,7 @@ class MainWindow(QMainWindow):
                     self.subtitle_box.setFocus()
                     return True
                 if key == Qt.Key_Left and focus is self.quality:
-                    self.fullscreen_button.setFocus()
+                    self.safe_area_button.setFocus()
                     return True
                 if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select) and focus is self.video_surface:
                     self.mpv_command(["cycle", "pause"])
@@ -2590,8 +2618,8 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key_Escape, Qt.Key_Back) and self.pages.currentWidget() == self.player_page:
-            if self.is_playback_fullscreen:
-                self.exit_playback_fullscreen()
+            if self.is_playback_safe_area:
+                self.exit_playback_safe_area()
             else:
                 self.back_to_results()
             return
@@ -2604,10 +2632,9 @@ class MainWindow(QMainWindow):
     def minimize_window(self):
         if self.isMinimized():
             return
-        if self.is_playback_fullscreen or self.isFullScreen():
-            # The windowed rectangle was saved before entering playback fullscreen.
-            # Never replace it with fullscreen geometry here.
-            self._activation_state = "fullscreen"
+        if self.is_playback_safe_area:
+            # Preserve the pre-expansion rectangle for a correct restore.
+            self._activation_state = "safe_area"
         elif self.isMaximized():
             self._restore_geometry = self.normalGeometry()
             self._activation_state = "maximized"
@@ -2620,10 +2647,10 @@ class MainWindow(QMainWindow):
     def restore_window(self):
         mode = self._activation_state
         geometry = self._restore_geometry
-        if mode == "fullscreen":
-            # Home and playback can both be fullscreen; restore the window state itself.
-            self.setWindowState(Qt.WindowFullScreen)
-            self.showFullScreen()
+        if mode == "safe_area":
+            self.setWindowState(Qt.WindowNoState)
+            self.show()
+            QTimer.singleShot(0, self.apply_playback_safe_area_geometry)
         elif mode == "maximized":
             self.setWindowState(Qt.WindowMaximized)
             self.showMaximized()
@@ -2642,11 +2669,9 @@ class MainWindow(QMainWindow):
                 old_state = event.oldState()
                 new_state = self.windowState()
                 if not (new_state & Qt.WindowMinimized):
-                    if old_state & Qt.WindowFullScreen:
-                        self._activation_state = "fullscreen"
-                    elif old_state & Qt.WindowMaximized:
+                    if old_state & Qt.WindowMaximized:
                         self._activation_state = "maximized"
-                    elif not (old_state & Qt.WindowMinimized):
+                    elif not (old_state & Qt.WindowMinimized) and not self.is_playback_safe_area:
                         self._activation_state = "normal"
             except (AttributeError, TypeError, RuntimeError):
                 pass
@@ -2663,7 +2688,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         self.mini_title_timer.stop()
-        self.fullscreen_hide_timer.stop()
+        self.safe_area_hide_timer.stop()
         for process in (self.search_process, self.player_process, self.metadata_process):
             if self.process_is_running(process):
                 process.terminate()
@@ -2710,10 +2735,9 @@ def main():
                 if window.isMinimized():
                     window.restore_window()
                 else:
-                    if window.is_playback_fullscreen:
-                        window.showFullScreen()
-                    else:
-                        window.show()
+                    window.show()
+                    if window.is_playback_safe_area:
+                        QTimer.singleShot(0, window.apply_playback_safe_area_geometry)
                     window.raise_()
                     window.activateWindow()
             client.disconnectFromServer()

@@ -18,10 +18,10 @@ A lightweight YouTube TV-style frontend for HG680P / Armbian Noble (ARM64).
 - Subtitle choices are enumerated after playback starts; original/manual captions and automatic captions are listed separately when available, with a supported subtitle format selected for each language. The selected track is applied to the active MPV session.
 - Quality preference: Auto, 360p, 480p, or 720p (limited by formats YouTube exposes). A quality change restarts the stream at the current playback position and reapplies the selected subtitle. The watch page reports MPV's actual decoded stream dimensions so a 720p maximum preference is not mistaken for a guaranteed 720p source.
 - Automatic next-video playback follows the current result/queue order.
-- Fullscreen playback hides surrounding UI; the timeline and controls reappear on mouse movement near the bottom or D-pad Down, then auto-hide after one second of inactivity.
+- Playback Safe Area expands the normal frameless app window to the configured screen-safe rectangle and hides surrounding UI; timeline and controls reappear on mouse movement near the bottom or D-pad Down, then auto-hide after one second of inactivity. It does not request the window manager's fullscreen state.
 - Back from playback returns to the Home/results page while audio playback continues; no floating video window is shown. A bordered mini-player in the Home header shows the scrolling title, progress, and remote-friendly controls; selecting its title returns to the active video without restarting it.
 - The active playback queue is kept separate from newly loaded search results, so browsing or searching does not unexpectedly replace the queue currently playing. Selecting a new result deliberately replaces the active playback session.
-- Home-only window controls stay pinned to the top-right corner; minimizing keeps playback running, while closing stops playback after confirmation. The app window remains frameless when restored or returned from playback fullscreen.
+- Home-only window controls stay pinned to the top-right corner; minimizing keeps playback running, while closing stops playback after confirmation. The app window remains frameless when restored or returned from playback Safe Area.
 - Playback and window controls use compact Qt standard icons rather than relying on emoji glyph availability. The Home mini-player uses a pixel-measured scrolling title and a circular progress indicator.
 - Video playback through system MPV.
 
@@ -39,7 +39,7 @@ Run as the normal desktop user (HG680P: roxy), not root. Device deployment uses 
 
 ## Safe Area
 
-The app reads ~/.config/roxy-display/safe-area.json. If missing, defaults are used. Margins are percentages of the app window and affect the interface only; they do not change Xorg output geometry or MPV video scaling.
+The app reads ~/.config/roxy-display/safe-area.json. If missing, default margins are used. On Home/search pages, margins inset the interface within the normal window. During playback Safe Area, the same percentages define the normal window's position and size relative to the screen; no Xorg output mode, compositor fullscreen state, or MPV video scaling is changed.
 
 Example:
 
@@ -50,6 +50,8 @@ Example:
       "margin_top": 5,
       "margin_bottom": 5
     }
+
+On a 720×576 PAL screen, 5% margins produce a playback window at **X=36, Y=29, 648×518**. Startup and Home/search remain in the normal window; the playback button toggles between that configured Safe Area rectangle and the saved normal window geometry.
 
 ## Limitations
 

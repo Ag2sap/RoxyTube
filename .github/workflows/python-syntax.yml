@@ -5,6 +5,7 @@ on:
     branches:
       - feature/tv-ui-single-layer
       - feature/plasmatube-style-ui
+      - roxytube-safearea
   pull_request:
     branches:
       - main
