@@ -43,15 +43,13 @@ Run as the normal desktop user (HG680P: roxy), not root. Device deployment uses 
 
 ## Safe Area
 
-RoxyTube reads the active profile from the Safe Area Manager configuration:
+The external Safe Area Manager Controller owns RoxyTube's top-level window position and size. It applies the active profile from:
 
     /home/Applications/Safe-Area-Manager-With-Controller/config/profiles.json
 
-Override this path with the `SAFE_AREA_CONFIG` environment variable. The same active profile drives RoxyTube's internal content margins and the external Openbox Window Geometry Controller. When the Manager profile is disabled, RoxyTube uses zero internal margins.
+The path can be overridden for the Controller with `SAFE_AREA_CONFIG`. When that Manager profile file exists, RoxyTube disables its legacy in-window margins so the Safe Area is not applied twice. If the Manager profile file is absent, the standalone legacy `~/.config/roxy-display/safe-area.json` margins remain available.
 
-The legacy `~/.config/roxy-display/safe-area.json` is used only when the Manager profile file is absent, preserving standalone compatibility. If the Manager file exists but is invalid, RoxyTube uses the safe 5% default rather than silently preferring stale legacy settings.
-
-The external Safe Area Controller owns the top-level window rectangle. Playback Safe Area only hides or reveals playback chrome; it does not resize or maximize the application window itself. This keeps Manager and Controller as the single source of truth for window geometry.
+Playback Safe Area only hides or reveals playback chrome; it does not resize, maximize, or restore the top-level application window. The Window Geometry Controller is the single owner of external window geometry. The Controller must be running in the X11/Openbox session for Manager profiles to affect RoxyTube.
 
 ## Limitations
 
