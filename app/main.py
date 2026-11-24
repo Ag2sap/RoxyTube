@@ -16,6 +16,10 @@ from PySide6.QtWidgets import (
 APP_NAME = "YouTube Roxy"
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 SAFE_AREA_FILE = CONFIG_DIR / "roxy-display" / "safe-area.json"
+SAFE_AREA_CONFIG = Path(os.environ.get(
+    "SAFE_AREA_CONFIG",
+    "/home/Applications/Safe-Area-Manager-With-Controller/config/profiles.json",
+))
 SETTINGS_FILE = CONFIG_DIR / "roxy-youtube-tv" / "settings.json"
 CACHE_DIR = Path.home() / ".cache" / "roxy-youtube-tv" / "thumbnails"
 YTDLP = os.environ.get("ROXY_YT_DLP", "yt-dlp")
@@ -29,7 +33,54 @@ QUALITY_FORMATS = {
 
 
 def safe_area_margins():
-    values = {"margin_left": 4, "margin_right": 4, "margin_top": 4, "margin_bottom": 4}
+    """Read the active Manager profile; use the legacy file only if absent."""
+    if SAFE_AREA_CONFIG.is_file():
+        defaults = {
+            "margin_left": 5.0, "margin_right": 5.0,
+            "margin_top": 5.0, "margin_bottom": 5.0,
+        }
+        try:
+            document = json.loads(SAFE_AREA_CONFIG.read_text(encoding="utf-8"))
+            if not isinstance(document, dict) or document.get("version") != 1:
+                raise ValueError("unsupported Safe Area Manager profile format")
+            active = document.get("active_profile")
+            profiles = document.get("profiles")
+            if not isinstance(active, str) or not isinstance(profiles, list):
+                raise ValueError("invalid Safe Area Manager profile document")
+            profile = next(
+                (item for item in profiles
+                 if isinstance(item, dict) and item.get("name") == active),
+                None,
+            )
+            if profile is None:
+                raise ValueError("active Safe Area profile does not exist")
+            if not isinstance(profile.get("enabled", True), bool):
+                raise ValueError("invalid Safe Area profile enabled flag")
+            if not profile.get("enabled", True):
+                return {key: 0.0 for key in defaults}
+            margins = profile.get("margins", {})
+            if not isinstance(margins, dict):
+                raise ValueError("invalid Safe Area profile margins")
+            result = {}
+            for edge, key in (
+                ("left", "margin_left"), ("right", "margin_right"),
+                ("top", "margin_top"), ("bottom", "margin_bottom"),
+            ):
+                value = margins.get(edge, 5.0)
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise ValueError(f"invalid Safe Area {edge} margin")
+                value = float(value)
+                if not 0.0 <= value <= 20.0:
+                    raise ValueError(f"Safe Area {edge} margin out of range")
+                result[key] = value
+            return result
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return defaults
+
+    values = {
+        "margin_left": 4.0, "margin_right": 4.0,
+        "margin_top": 4.0, "margin_bottom": 4.0,
+    }
     try:
         data = json.loads(SAFE_AREA_FILE.read_text(encoding="utf-8"))
         for key in values:
@@ -1234,6 +1285,9 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(700, lambda: self.load_feed("home"))
 
     def apply_safe_area(self):
+        # Refresh from the shared Manager file whenever the window geometry
+        # changes, so profile edits are reflected without restarting RoxyTube.
+        self.safe_margins = safe_area_margins()
         m, w, h = self.safe_margins, max(1, self.width()), max(1, self.height())
         self.root_layout.setContentsMargins(round(w*m["margin_left"]/100),
             round(h*m["margin_top"]/100), round(w*m["margin_right"]/100),
@@ -2478,7 +2532,8 @@ class MainWindow(QMainWindow):
         if screen is None:
             return QRect(0, 0, self.width(), self.height())
         bounds = screen.geometry()
-        margins = self.safe_margins
+        margins = safe_area_margins()
+        self.safe_margins = margins
         left = round(bounds.width() * margins["margin_left"] / 100)
         right = round(bounds.width() * margins["margin_right"] / 100)
         top = round(bounds.height() * margins["margin_top"] / 100)
@@ -2491,10 +2546,9 @@ class MainWindow(QMainWindow):
         )
 
     def apply_playback_safe_area_geometry(self):
-        """Expand the normal frameless window into the configured Safe Area."""
-        self.setMinimumSize(1, 1)
-        self.setWindowState(Qt.WindowNoState)
-        self.setGeometry(self.playback_safe_area_geometry())
+        """Refresh layout margins; the external Controller owns window geometry."""
+        self.safe_margins = safe_area_margins()
+        self.apply_safe_area()
 
     def toggle_playback_safe_area(self):
         if self.is_playback_safe_area:
@@ -2533,17 +2587,11 @@ class MainWindow(QMainWindow):
         self.is_playback_safe_area = False
         self.safe_area_controls_visible = True
         self.setMinimumSize(self._normal_minimum_size)
-        if self._playback_return_window_state == "maximized":
-            self.setWindowState(Qt.WindowMaximized)
-            self.showMaximized()
-            self._activation_state = "maximized"
-        else:
-            self.setWindowState(Qt.WindowNoState)
-            self.show()
-            self._activation_state = "normal"
-            if self._restore_geometry is not None and self._restore_geometry.isValid():
-                geometry = self._restore_geometry
-                QTimer.singleShot(0, lambda: self.setGeometry(geometry))
+        # The Safe Area Controller owns the top-level window rectangle.
+        # Returning from playback Safe Area restores UI chrome, not geometry.
+        self.setWindowState(Qt.WindowNoState)
+        self.show()
+        self._activation_state = "normal"
         self.player_header_widget.show()
         self.player_meta.hide()
         self.channel_profile_button.show()
