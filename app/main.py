@@ -809,6 +809,7 @@ class MainWindow(QMainWindow):
         mini_title_row.setContentsMargins(0, 0, 0, 0)
         mini_title_row.setSpacing(3)
         self.mini_title_button = QPushButton("Tidak ada playback")
+        self.mini_title_button.setFocusPolicy(Qt.StrongFocus)
         self.mini_title_button.setFixedHeight(21)
         self.mini_title_button.setMinimumWidth(0)
         self.mini_title_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -879,6 +880,7 @@ class MainWindow(QMainWindow):
         self.close_button.setToolTip("Tutup aplikasi dan hentikan playback")
         self.close_button.clicked.connect(self.close)
         for widget in (self.minimize_button, self.close_button):
+            widget.setFocusPolicy(Qt.StrongFocus)
             widget.setIconSize(QSize(20, 20))
             widget.setStyleSheet(
                 "QPushButton{padding:0;border:0;background:transparent;border-radius:4px;}"
@@ -2668,12 +2670,26 @@ class MainWindow(QMainWindow):
                     event.accept()
                     return True
 
-            # Window controls live on the search page, outside the playback-only
-            # activation list below, so activate them explicitly with the remote OK.
-            if key in activation_keys and focus in (
-                getattr(self, "minimize_button", None), getattr(self, "close_button", None)
-            ):
-                focus.click()
+            # Explicitly activate every compact header control with remote OK.
+            # Some TV remotes deliver Key_Select to the watched widget while others
+            # deliver Return/Enter to the current focus widget; accept either route.
+            remote_action_buttons = (
+                getattr(self, "minimize_button", None),
+                getattr(self, "close_button", None),
+                getattr(self, "mini_title_button", None),
+                getattr(self, "mini_rewind_button", None),
+                getattr(self, "mini_play_pause_button", None),
+                getattr(self, "mini_fast_forward_button", None),
+                getattr(self, "mini_stop_button", None),
+            )
+            activation_target = (
+                focus if focus in remote_action_buttons
+                else watched if watched in remote_action_buttons
+                else None
+            )
+            if (key in activation_keys and activation_target is not None
+                    and activation_target.isEnabled() and activation_target.isVisible()):
+                activation_target.click()
                 event.accept()
                 return True
 
