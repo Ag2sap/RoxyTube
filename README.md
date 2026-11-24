@@ -22,7 +22,7 @@ A lightweight YouTube TV-style frontend for HG680P / Armbian Noble (ARM64).
 - Subtitle choices are enumerated after playback starts; original/manual captions and automatic captions are listed separately when available, with a supported subtitle format selected for each language. The selected track is applied to the active MPV session.
 - Quality preference: Auto, 360p, 480p, or 720p (limited by formats YouTube exposes). A quality change restarts the stream at the current playback position and reapplies the selected subtitle. The watch page reports MPV's actual decoded stream dimensions so a 720p maximum preference is not mistaken for a guaranteed 720p source.
 - Automatic next-video playback follows the current result/queue order.
-- Playback Safe Area expands the normal frameless app window to the configured screen-safe rectangle and hides surrounding UI; timeline and controls reappear on mouse movement near the bottom or D-pad Down, then auto-hide after one second of inactivity. It does not request the window manager's fullscreen state.
+- Playback Safe Area hides surrounding playback UI; timeline and controls reappear on mouse movement near the bottom or D-pad Down, then auto-hide after one second of inactivity. The top-level window position and size are owned by the external Safe Area Manager Controller.
 - Back from playback returns to the Home/results page while audio playback continues; no floating video window is shown. A bordered mini-player in the Home header shows the scrolling title, progress, and remote-friendly controls; selecting its title returns to the active video without restarting it.
 - The active playback queue is kept separate from newly loaded search results, so browsing or searching does not unexpectedly replace the queue currently playing. Selecting a new result deliberately replaces the active playback session.
 - Home-only window controls stay pinned to the top-right corner; minimizing keeps playback running, while closing stops playback after confirmation. The app window remains frameless when restored or returned from playback Safe Area.
@@ -43,19 +43,15 @@ Run as the normal desktop user (HG680P: roxy), not root. Device deployment uses 
 
 ## Safe Area
 
-The app reads ~/.config/roxy-display/safe-area.json. If missing, default margins are used. On Home/search pages, margins inset the interface within the normal window. During playback Safe Area, the same percentages define the normal window's position and size relative to the screen; no Xorg output mode, compositor fullscreen state, or MPV video scaling is changed.
+RoxyTube reads the active profile from the Safe Area Manager configuration:
 
-Example:
+    /home/Applications/Safe-Area-Manager-With-Controller/config/profiles.json
 
-    {
-      "aspect_ratio": "4:3",
-      "margin_left": 5,
-      "margin_right": 5,
-      "margin_top": 5,
-      "margin_bottom": 5
-    }
+Override this path with the `SAFE_AREA_CONFIG` environment variable. The same active profile drives RoxyTube's internal content margins and the external Openbox Window Geometry Controller. When the Manager profile is disabled, RoxyTube uses zero internal margins.
 
-On a 720×576 PAL screen, 5% margins produce a playback window at **X=36, Y=29, 648×518**. Startup and Home/search remain in the normal window; the playback button toggles between that configured Safe Area rectangle and the saved normal window geometry.
+The legacy `~/.config/roxy-display/safe-area.json` is used only when the Manager profile file is absent, preserving standalone compatibility. If the Manager file exists but is invalid, RoxyTube uses the safe 5% default rather than silently preferring stale legacy settings.
+
+The external Safe Area Controller owns the top-level window rectangle. Playback Safe Area only hides or reveals playback chrome; it does not resize or maximize the application window itself. This keeps Manager and Controller as the single source of truth for window geometry.
 
 ## Limitations
 
