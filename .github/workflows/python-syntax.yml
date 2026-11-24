@@ -6,6 +6,7 @@ on:
       - feature/tv-ui-single-layer
       - feature/plasmatube-style-ui
       - roxytube-safearea
+      - feature/safe-area-manager-integration
   pull_request:
     branches:
       - main
