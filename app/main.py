@@ -33,49 +33,12 @@ QUALITY_FORMATS = {
 
 
 def safe_area_margins():
-    """Read the active Manager profile; use the legacy file only if absent."""
+    """Avoid a second inset when the external Manager owns window geometry."""
     if SAFE_AREA_CONFIG.is_file():
-        defaults = {
-            "margin_left": 5.0, "margin_right": 5.0,
-            "margin_top": 5.0, "margin_bottom": 5.0,
+        return {
+            "margin_left": 0.0, "margin_right": 0.0,
+            "margin_top": 0.0, "margin_bottom": 0.0,
         }
-        try:
-            document = json.loads(SAFE_AREA_CONFIG.read_text(encoding="utf-8"))
-            if not isinstance(document, dict) or document.get("version") != 1:
-                raise ValueError("unsupported Safe Area Manager profile format")
-            active = document.get("active_profile")
-            profiles = document.get("profiles")
-            if not isinstance(active, str) or not isinstance(profiles, list):
-                raise ValueError("invalid Safe Area Manager profile document")
-            profile = next(
-                (item for item in profiles
-                 if isinstance(item, dict) and item.get("name") == active),
-                None,
-            )
-            if profile is None:
-                raise ValueError("active Safe Area profile does not exist")
-            if not isinstance(profile.get("enabled", True), bool):
-                raise ValueError("invalid Safe Area profile enabled flag")
-            if not profile.get("enabled", True):
-                return {key: 0.0 for key in defaults}
-            margins = profile.get("margins", {})
-            if not isinstance(margins, dict):
-                raise ValueError("invalid Safe Area profile margins")
-            result = {}
-            for edge, key in (
-                ("left", "margin_left"), ("right", "margin_right"),
-                ("top", "margin_top"), ("bottom", "margin_bottom"),
-            ):
-                value = margins.get(edge, 5.0)
-                if isinstance(value, bool) or not isinstance(value, (int, float)):
-                    raise ValueError(f"invalid Safe Area {edge} margin")
-                value = float(value)
-                if not 0.0 <= value <= 20.0:
-                    raise ValueError(f"Safe Area {edge} margin out of range")
-                result[key] = value
-            return result
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            return defaults
 
     values = {
         "margin_left": 4.0, "margin_right": 4.0,
