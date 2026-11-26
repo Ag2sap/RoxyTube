@@ -110,7 +110,7 @@ Langkah berikutnya setelah artifact tersedia:
 1. Pasang runtime ke direktori app-local tanpa mengganti binary sistem.
 2. Verifikasi `mpv --hwdec=help` menampilkan non-copy `v4l2m2m`, dan `mpv --gpu-hwdec-interop=help` menampilkan `drmprime`.
 3. Uji video H.264 1080p pada X11 child window dan pastikan log menampilkan `drm_prime[nv12]` (atau format DRM PRIME yang sesuai).
-4. Ukur CPU, frame-drop, seek, subtitle, audio, dan Safe Area sebelum menjadikan mode ini default.
+4. Ukur CPU, frame-drop, seek, subtitle, audio, dan Safe Area sebelum menjadikan mode ini default. Mode eksperimen dijalankan dengan `ROXY_ENABLE_DRMPRIME=1 sh scripts/run.sh`.
 
 ### 5. Safe Area dan integrasi antarmuka
 
@@ -146,6 +146,7 @@ DRM PRIME baru dianggap selesai jika log membuktikan frame DRM PRIME diterima ol
 - [x] Pilihan kualitas 1080p dan fallback ditambahkan.
 - [x] MPV embedded diarahkan ke GPU EGL/X11 dengan V4L2 copy sebagai jalur transisi.
 - [x] Override interop GPU DRM PRIME disediakan, tetapi tidak aktif pada build saat ini.
+- [x] Installer runtime app-local dan launcher opt-in ditambahkan.
 - [x] Safe Area lama dipertahankan.
 - [ ] Uji syntax dan installer di CI.
 - [ ] Jalankan installer dan playback di HG680P.
