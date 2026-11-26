@@ -30,7 +30,8 @@ curl -fsSL --retry 3 \
     -o "$TMP_DIR/release.json"
 TAG="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["tag_name"])' "$TMP_DIR/release.json")"
 case "$TAG" in
-    ""|*[!0-9.]*) echo "Unexpected Deno release tag: $TAG" >&2; exit 1 ;;
+    v[0-9]*|[0-9]*) ;;
+    *) echo "Unexpected Deno release tag: $TAG" >&2; exit 1 ;;
 esac
 
 BASE_URL="https://github.com/denoland/deno/releases/download/$TAG"
