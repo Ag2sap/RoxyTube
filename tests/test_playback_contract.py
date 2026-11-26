@@ -81,7 +81,7 @@ class PlaybackContractTests(unittest.TestCase):
         self.assertIn("--input-default-bindings=no", launch)
 
     def test_quality_options_include_1080p(self):
-        self.assertIn('"1080p": "bv*[height<=1080]+ba/b[height<=1080]"', APP_SOURCE)
+        self.assertIn('"1080p": "bv*[vcodec^=avc1][height<=1080]+ba/b[vcodec^=avc1][height<=1080]"', APP_SOURCE)
         fallback = function_source(APP_SOURCE, "quality_fallbacks")
         self.assertIn('if quality == "1080p"', fallback)
 
