@@ -17,10 +17,12 @@ if [ ! -d "$APP_ROOT/.git" ]; then
     echo "Set ROXYTUBE_ROOT if the installation is elsewhere." >&2
     exit 1
 fi
-if ! command -v git >/dev/null 2>&1; then
-    echo "git is required." >&2
-    exit 1
-fi
+for command in git curl python3 unzip sha256sum; do
+    command -v "$command" >/dev/null 2>&1 || {
+        echo "Missing required command: $command. Nothing has been changed." >&2
+        exit 1
+    }
+done
 
 cd "$APP_ROOT"
 if [ -n "$(git status --porcelain)" ]; then
