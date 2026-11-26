@@ -3,8 +3,9 @@
 from __future__ import annotations
 import json, os, shutil, sys
 from pathlib import Path
-from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve, QSize, QRect
-from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QIcon, QPainterPath
+from urllib.parse import quote_plus
+from PySide6.QtCore import Qt, QEvent, QProcess, QProcessEnvironment, QUrl, QTimer, QPropertyAnimation, QEasingCurve, QSize, QRect
+from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QIcon, QPainterPath, QFontMetrics
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDiskCache, QLocalSocket, QLocalServer
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
@@ -17,13 +18,82 @@ CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 SAFE_AREA_FILE = CONFIG_DIR / "roxy-display" / "safe-area.json"
 SETTINGS_FILE = CONFIG_DIR / "roxy-youtube-tv" / "settings.json"
 CACHE_DIR = Path.home() / ".cache" / "roxy-youtube-tv" / "thumbnails"
-YTDLP = os.environ.get("ROXY_YT_DLP", "yt-dlp")
+APP_DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "roxy-youtube-tv"
+APP_YTDLP = APP_DATA_DIR / "bin" / "yt-dlp"
+APP_DENO = APP_DATA_DIR / "runtime" / "bin" / "deno"
+APP_DENO_CACHE = APP_DATA_DIR / "cache" / "deno"
+APP_YTDLP_CONFIG = CONFIG_DIR / "roxy-youtube-tv" / "yt-dlp.conf"
+
+
+def resolve_ytdlp():
+    """Prefer an explicit override, then RoxyTube's app-local binary, then PATH."""
+    override = os.environ.get("ROXY_YT_DLP")
+    if override:
+        return override
+    if APP_YTDLP.is_file() and os.access(APP_YTDLP, os.X_OK):
+        return str(APP_YTDLP)
+    return shutil.which("yt-dlp") or "yt-dlp"
+
+
+def ytdlp_arguments(arguments):
+    """Isolate RoxyTube from global yt-dlp config while allowing an app-owned config."""
+    args = ["--ignore-config"]
+    if APP_YTDLP_CONFIG.is_file():
+        args.extend(["--config-locations", str(APP_YTDLP_CONFIG)])
+    if APP_DENO.is_file() and os.access(APP_DENO, os.X_OK):
+        args.extend(["--js-runtimes", f"deno:{APP_DENO}"])
+    return args + list(arguments)
+
+
+def mpv_process_environment():
+    """Make MPV's ytdl_hook resolve the same yt-dlp binary as RoxyTube."""
+    environment = QProcessEnvironment.systemEnvironment()
+    executable = shutil.which(YTDLP) or YTDLP
+    executable_path = Path(executable)
+    path_entries = []
+    if executable_path.is_absolute():
+        path_entries.append(str(executable_path.resolve().parent))
+    if APP_DENO.is_file() and os.access(APP_DENO, os.X_OK):
+        path_entries.append(str(APP_DENO.resolve().parent))
+        environment.insert("DENO_DIR", str(APP_DENO_CACHE))
+    current_path = environment.value("PATH")
+    for entry in reversed(path_entries):
+        if entry not in current_path.split(os.pathsep):
+            current_path = entry + os.pathsep + current_path
+    environment.insert("PATH", current_path)
+    return environment
+
+
+def mpv_ytdl_raw_options(quality):
+    """Pass the isolated yt-dlp config policy through MPV's ytdl_hook."""
+    resolution = quality.replace("p", "") if quality != "Auto" else "1080"
+    options = ["ignore-config=", "sub-langs=none", f"format-sort=res:{resolution}"]
+    if APP_YTDLP_CONFIG.is_file():
+        options.append(f"config-locations={APP_YTDLP_CONFIG}")
+    if APP_DENO.is_file() and os.access(APP_DENO, os.X_OK):
+        options.append(f"js-runtimes=deno:{APP_DENO}")
+    return ",".join(options)
+
+
+YTDLP = resolve_ytdlp()
 MPV = os.environ.get("ROXY_MPV", "mpv")
+MPV_HWDEC = os.environ.get("ROXY_MPV_HWDEC", "v4l2m2m-copy")
+MPV_HWDEC_FALLBACKS = tuple(
+    item.strip() for item in os.environ.get("ROXY_MPV_HWDEC_FALLBACKS", "no").split(",")
+    if item.strip()
+)
+MPV_VO = os.environ.get("ROXY_MPV_VO", "gpu")
+MPV_GPU_CONTEXT = os.environ.get("ROXY_MPV_GPU_CONTEXT", "x11egl")
+MPV_GPU_API = os.environ.get("ROXY_MPV_GPU_API", "opengl")
+MPV_GPU_HWDEC_INTEROP = os.environ.get("ROXY_MPV_GPU_HWDEC_INTEROP", "")
+# Prefer YouTube AVC/H.264 streams so HG680P can use meson-vdec.
+# Auto retains the baseline's 1080p preference; explicit choices are hard caps.
 QUALITY_FORMATS = {
-    "Auto": "bv*+ba/b",
-    "360p": "bv*[height<=360]+ba/b[height<=360]",
-    "480p": "bv*[height<=480]+ba/b[height<=480]",
-    "720p": "bv*[height<=720]+ba/b[height<=720]",
+    "Auto": "bv*[vcodec^=avc1]+ba/b[vcodec^=avc1]",
+    "360p": "bv*[vcodec^=avc1][height<=360]+ba/b[vcodec^=avc1][height<=360]",
+    "480p": "bv*[vcodec^=avc1][height<=480]+ba/b[vcodec^=avc1][height<=480]",
+    "720p": "bv*[vcodec^=avc1][height<=720]+ba/b[vcodec^=avc1][height<=720]",
+    "1080p": "bv*[vcodec^=avc1][height<=1080]+ba/b[vcodec^=avc1][height<=1080]",
 }
 
 
@@ -150,6 +220,52 @@ def format_view_count(value):
     if count >= 1_000:
         return f"{count / 1_000:.1f}".replace(".", ",") + " rb ditonton"
     return f"{count:,}".replace(",", ".") + " ditonton"
+
+
+def format_subscriber_count(value):
+    try:
+        count = max(0, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return ""
+    if count >= 1_000_000_000:
+        number, suffix = count / 1_000_000_000, " M subscriber"
+    elif count >= 1_000_000:
+        number, suffix = count / 1_000_000, " jt subscriber"
+    elif count >= 1_000:
+        number, suffix = count / 1_000, " rb subscriber"
+    else:
+        return f"{count:,}".replace(",", ".") + " subscriber"
+    return f"{number:.1f}".replace(".", ",") + suffix
+
+
+def channel_avatar_url(entry):
+    for key in ("channel_thumbnail", "uploader_thumbnail", "channel_avatar"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            return value
+    images = entry.get("channel_thumbnails") or []
+    if not images and entry.get("_type") in ("url", "playlist"):
+        images = entry.get("thumbnails") or []
+    usable = [item for item in images if isinstance(item, dict) and item.get("url")]
+    if usable:
+        usable.sort(key=lambda item: abs((item.get("width") or 96) - 96))
+        return usable[0]["url"]
+    return ""
+
+
+def channel_page_url(entry):
+    candidate = entry.get("channel_url") or entry.get("uploader_url")
+    if candidate and candidate.startswith(("http://", "https://")):
+        return candidate
+    channel_id = entry.get("channel_id")
+    if not channel_id and entry.get("_type") in ("url", "playlist"):
+        channel_id = entry.get("id")
+    if channel_id:
+        return f"https://www.youtube.com/channel/{channel_id}"
+    candidate = entry.get("url") or entry.get("webpage_url")
+    if candidate and ("/channel/" in candidate or "/@" in candidate):
+        return candidate if candidate.startswith("http") else "https://www.youtube.com/" + candidate.lstrip("/")
+    return ""
 
 
 class TvKeyboard(QWidget):
@@ -366,8 +482,54 @@ class TvKeyboard(QWidget):
         self.on_finish()
 
 
+class TwoLineTitleLabel(QLabel):
+    """A compact two-line title that always marks truncated text with an ellipsis."""
+
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        self.full_text = str(text or "")
+        self.setWordWrap(False)
+        self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.setMinimumWidth(0)
+        self.setMaximumHeight(38)
+        self.refresh_elided_text()
+
+    def set_full_text(self, text):
+        self.full_text = str(text or "")
+        self.refresh_elided_text()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.refresh_elided_text()
+
+    def refresh_elided_text(self):
+        width = max(1, self.contentsRect().width())
+        metrics = QFontMetrics(self.font())
+        words = self.full_text.split()
+        if not words:
+            self.setText("")
+            return
+
+        first = []
+        while words:
+            candidate = " ".join(first + [words[0]])
+            if metrics.horizontalAdvance(candidate) <= width:
+                first.append(words.pop(0))
+            elif not first:
+                first.append(metrics.elidedText(words.pop(0), Qt.ElideRight, width))
+                break
+            else:
+                break
+
+        lines = [" ".join(first)]
+        if words:
+            remainder = " ".join(words)
+            lines.append(metrics.elidedText(remainder, Qt.ElideRight, width))
+        self.setText("\n".join(lines[:2]))
+
+
 class VideoCard(QFrame):
-    def __init__(self, index, title, channel, duration, view_count="", parent=None):
+    def __init__(self, index, title, channel, duration, view_count="", avatar_url="", parent=None):
         super().__init__(parent)
         self.index = index
         self.on_activate = None
@@ -406,15 +568,20 @@ class VideoCard(QFrame):
         self.duration_label.setStyleSheet(
             "QLabel { background:rgba(0,0,0,220); color:white; border-radius:3px;"
             " padding:2px 5px; font-size:10px; font-weight:700; }")
+        self.channel_avatar_url = avatar_url or ""
+        self.avatar_label = QLabel((channel or "Y")[:1].upper())
+        self.avatar_label.setFixedSize(30, 30)
+        self.avatar_label.setAlignment(Qt.AlignCenter)
+        self.avatar_label.setStyleSheet(
+            "QLabel{background:#35465d;color:white;border:2px solid white;"
+            "border-radius:15px;font-size:12px;font-weight:800;}")
+        thumb_layout.addWidget(self.avatar_label, 0, 0, Qt.AlignLeft | Qt.AlignBottom)
         self.duration_label.setVisible(bool(duration))
         thumb_layout.addWidget(self.duration_label, 0, 0, Qt.AlignRight | Qt.AlignBottom)
         layout.addWidget(self.thumbnail_frame)
 
-        self.title_label = QLabel(title)
+        self.title_label = TwoLineTitleLabel(title)
         self.title_label.setObjectName("videoTitle")
-        self.title_label.setWordWrap(True)
-        self.title_label.setMinimumWidth(0)
-        self.title_label.setMaximumHeight(38)
         self.title_label.setStyleSheet("font-size:13px;font-weight:700;color:#f4f6f8;background:transparent;border:0;")
         layout.addWidget(self.title_label)
         meta_row = QHBoxLayout()
@@ -472,6 +639,85 @@ class VideoCard(QFrame):
         self.image.setText("")
         self.update_thumbnail_pixmap()
 
+    def set_channel_avatar(self, pixmap):
+        if pixmap is None or pixmap.isNull():
+            return
+        self.avatar_label.setText("")
+        self.avatar_label.setPixmap(circular_avatar(pixmap, 30))
+
+
+def circular_avatar(pixmap, size=30):
+    if pixmap is None or pixmap.isNull():
+        return QPixmap()
+    scaled = pixmap.scaled(size, size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+    x = max(0, (scaled.width() - size) // 2)
+    y = max(0, (scaled.height() - size) // 2)
+    cropped = scaled.copy(QRect(x, y, size, size))
+    result = QPixmap(size, size)
+    result.fill(Qt.transparent)
+    painter = QPainter(result)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    path = QPainterPath()
+    path.addEllipse(0, 0, size, size)
+    painter.setClipPath(path)
+    painter.drawPixmap(0, 0, cropped)
+    painter.end()
+    return result
+
+
+class ChannelCard(QFrame):
+    def __init__(self, index, name, subscribers="", description="", avatar_url="", parent=None):
+        super().__init__(parent)
+        self.index = index
+        self.on_activate = None
+        self.setObjectName("channelCard")
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.setMinimumHeight(108)
+        self.setStyleSheet("""
+            QFrame#channelCard{background:#1a202a;border:2px solid #303b4a;border-radius:9px;}
+            QFrame#channelCard:focus{background:#29384b;border:3px solid #ffd166;}
+            QFrame#channelCard:focus QLabel#channelName{color:#ffd166;}
+        """)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(10, 8, 10, 8)
+        row.setSpacing(10)
+        self.avatar_label = QLabel((name or "C")[:1].upper())
+        self.avatar_label.setFixedSize(54, 54)
+        self.avatar_label.setAlignment(Qt.AlignCenter)
+        self.avatar_label.setStyleSheet(
+            "QLabel{background:#35465d;color:white;border:2px solid #aeb8c5;"
+            "border-radius:27px;font-size:19px;font-weight:800;}")
+        row.addWidget(self.avatar_label, 0, Qt.AlignVCenter)
+        details = QVBoxLayout()
+        details.setSpacing(3)
+        self.name_label = QLabel(name or "Channel tanpa nama")
+        self.name_label.setObjectName("channelName")
+        self.name_label.setWordWrap(True)
+        self.name_label.setStyleSheet("font-size:13px;font-weight:800;color:#f4f6f8;background:transparent;border:0;")
+        details.addWidget(self.name_label)
+        self.subscriber_label = QLabel(subscribers or "Channel YouTube")
+        self.subscriber_label.setObjectName("hint")
+        details.addWidget(self.subscriber_label)
+        self.description_label = QLabel(description or " ")
+        self.description_label.setWordWrap(True)
+        self.description_label.setMaximumHeight(34)
+        self.description_label.setStyleSheet("font-size:10px;color:#aeb8c5;background:transparent;border:0;")
+        details.addWidget(self.description_label)
+        row.addLayout(details, 1)
+        self.channel_avatar_url = avatar_url or ""
+
+    def set_channel_avatar(self, pixmap):
+        if pixmap is None or pixmap.isNull():
+            return
+        self.avatar_label.setText("")
+        self.avatar_label.setPixmap(circular_avatar(pixmap, 54))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and callable(self.on_activate):
+            self.on_activate(self.index)
+        super().mousePressEvent(event)
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -495,6 +741,14 @@ class MainWindow(QMainWindow):
         self.thumbnail_active = 0
         self.thumbnail_cards = {}
         self.thumbnail_replies = set()
+        self.avatar_queue = []
+        self.avatar_active = 0
+        self.avatar_replies = set()
+        self.channel_avatar_lookup_queue = []
+        self.channel_avatar_lookup_process = None
+        self.search_kind = "videos"
+        self.channel_profile_reply = None
+        self.description_expanded = False
         self.network = QNetworkAccessManager(self)
         self.cache = QNetworkDiskCache(self)
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -574,6 +828,7 @@ class MainWindow(QMainWindow):
             ("Cari", "search", QStyle.SP_FileDialogContentsView),
             ("Trending", "trending", QStyle.SP_BrowserReload),
             ("Video", "videos", QStyle.SP_MediaPlay),
+            ("Channel", "channels", QStyle.SP_DirIcon),
             ("Riwayat", "history", QStyle.SP_FileDialogInfoView),
             ("Favorit", "favorites", QStyle.SP_DialogApplyButton),
             ("Playlist", "playlists", QStyle.SP_FileDialogListView),
@@ -720,7 +975,7 @@ class MainWindow(QMainWindow):
         self.search_button.setIconSize(QSize(20, 20))
         self.search_button.setFixedSize(38, 34)
         self.search_button.setFocusPolicy(Qt.StrongFocus)
-        self.search_button.setToolTip("Cari video")
+        self.search_button.setToolTip("Cari video atau channel sesuai menu aktif")
         self.search_button.clicked.connect(self.search)
         search_row.addWidget(self.query, 1)
         search_row.addWidget(self.keyboard_button)
@@ -869,7 +1124,17 @@ class MainWindow(QMainWindow):
         self.resolution_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.resolution_label.setStyleSheet(
             "color:#b9c5d3;font-size:11px;padding:2px 4px;border:0;")
-        meta_row.addWidget(self.player_meta, 1)
+        self.channel_profile_button = QPushButton("YouTube")
+        self.channel_profile_button.setFocusPolicy(Qt.StrongFocus)
+        self.channel_profile_button.setIconSize(QSize(28, 28))
+        self.channel_profile_button.setMinimumHeight(36)
+        self.channel_profile_button.setStyleSheet(
+            "QPushButton{text-align:left;padding:2px 5px;background:transparent;border:1px solid #354253;}"
+            "QPushButton:focus{background:#3a4b60;border:3px solid #ffd166;}")
+        self.channel_profile_button.clicked.connect(self.open_current_channel)
+        meta_row.addWidget(self.channel_profile_button, 1)
+        meta_row.addWidget(self.player_meta, 0)
+        self.player_meta.hide()
         meta_row.addWidget(self.player_views_label, 0)
         meta_row.addWidget(self.player_duration_label, 0)
         meta_row.addWidget(self.resolution_label, 0)
@@ -889,8 +1154,12 @@ class MainWindow(QMainWindow):
         self.description_button = QPushButton("Description")
         self.description_button.setToolTip("Deskripsi video")
         self.description_button.clicked.connect(lambda: self.show_side_panel("description"))
+        self.description_expand_button = QPushButton("Perbesar")
+        self.description_expand_button.setToolTip("Perbesar area deskripsi dan lipat video")
+        self.description_expand_button.clicked.connect(self.toggle_description_expanded)
         side_buttons.addWidget(self.playlist_button)
         side_buttons.addWidget(self.description_button)
+        side_buttons.addWidget(self.description_expand_button)
         side_layout.addLayout(side_buttons)
         self.side_content = QScrollArea()
         self.side_content.setWidgetResizable(True)
@@ -977,6 +1246,7 @@ class MainWindow(QMainWindow):
         self.stop_button.setToolTip("Stop playback")
         self.stop_button.clicked.connect(self.stop_playback)
         self.subtitle_box = QComboBox()
+        self.subtitle_box.setFocusPolicy(Qt.StrongFocus)
         self.subtitle_box.setMinimumWidth(105)
         self.subtitle_box.addItem("Subtitle: Off", None)
         self.subtitle_box.currentIndexChanged.connect(self.select_subtitle)
@@ -989,6 +1259,7 @@ class MainWindow(QMainWindow):
         self.fullscreen_button.setToolTip("Fullscreen playback")
         self.fullscreen_button.clicked.connect(self.toggle_playback_fullscreen)
         self.quality = QComboBox()
+        self.quality.setFocusPolicy(Qt.StrongFocus)
         self.quality.addItems(list(QUALITY_FORMATS))
         self.quality.setCurrentText("720p")
         self.quality.setMinimumWidth(68)
@@ -1093,6 +1364,12 @@ class MainWindow(QMainWindow):
         self.cards.clear()
         self.thumbnail_cards.clear()
         self.thumbnail_queue.clear()
+        self.avatar_queue.clear()
+        self.channel_avatar_lookup_queue.clear()
+        lookup = self.channel_avatar_lookup_process
+        self.channel_avatar_lookup_process = None
+        if self.process_is_running(lookup):
+            lookup.kill()
 
     def set_active_nav(self, mode):
         for button, button_mode in zip(self.nav_buttons, self.nav_modes):
@@ -1123,9 +1400,19 @@ class MainWindow(QMainWindow):
         else:
             self.pages.setCurrentWidget(self.search_page)
             if mode == "search":
+                self.search_kind = "videos"
+                self.query.setPlaceholderText("Cari video atau tempel URL YouTube…")
                 self.keyboard_button.setFocus(Qt.OtherFocusReason)
                 self.status.setText("Pilih KEY untuk membuka keyboard, atau pilih kolom teks untuk mengetik.")
+            elif mode == "channels":
+                self.search_kind = "channels"
+                self.query.setPlaceholderText("Cari nama channel YouTube…")
+                self.results_heading.setText("PENCARIAN CHANNEL")
+                self.status.setText("Masukkan nama channel, lalu tekan Cari.")
+                self.keyboard_button.setFocus(Qt.OtherFocusReason)
             elif mode in ("home", "trending"):
+                self.search_kind = "videos"
+                self.query.setPlaceholderText("Cari video atau tempel URL YouTube…")
                 self.load_feed(mode)
             else:
                 self.results_heading.setText(mode.upper())
@@ -1148,6 +1435,7 @@ class MainWindow(QMainWindow):
         if self.process_is_running(self.search_process):
             self.search_process.kill()
         self.set_active_nav(mode)
+        self.search_kind = "videos"
         self.clear_cards()
         self.results = []
         self.current_page = 0
@@ -1166,13 +1454,14 @@ class MainWindow(QMainWindow):
         process = QProcess(self)
         self.search_process = process
         process.setProgram(YTDLP)
-        process.setArguments(["--no-warnings", "--flat-playlist", "--dump-single-json", target])
+        process.setArguments(ytdlp_arguments(["--no-warnings", "--flat-playlist", "--dump-single-json", target]))
         process.finished.connect(lambda code, status, p=process: self.search_finished(p, code, status))
         process.errorOccurred.connect(lambda _err, p=process: self.search_error(p))
         process.start()
 
     def search(self):
-        self.set_active_nav("search")
+        mode = self.feed_mode
+        self.set_active_nav(mode if mode in ("search", "channels") else "search")
         self.collapse_sidebar()
         term = self.query.text().strip()
         if not term:
@@ -1188,13 +1477,24 @@ class MainWindow(QMainWindow):
         self.clear_cards()
         self.results = []
         self.current_page = 0
-        self.status.setText("Mencari video YouTube…")
-        self.results_heading.setText("HASIL PENCARIAN")
-        target = term if term.startswith(("http://", "https://")) else f"ytsearch60:{term}"
+        if self.search_kind == "channels":
+            self.status.setText("Mencari channel YouTube…")
+            self.results_heading.setText("HASIL PENCARIAN CHANNEL")
+            target = (
+                "https://www.youtube.com/results?search_query="
+                + quote_plus(term) + "&sp=EgIQAg%253D%253D"
+            )
+            arguments = ["--no-warnings", "--flat-playlist", "--playlist-end", "40",
+                         "--dump-single-json", target]
+        else:
+            self.status.setText("Mencari video YouTube…")
+            self.results_heading.setText("HASIL PENCARIAN VIDEO")
+            target = term if term.startswith(("http://", "https://")) else f"ytsearch60:{term}"
+            arguments = ["--no-warnings", "--flat-playlist", "--dump-single-json", target]
         process = QProcess(self)
         self.search_process = process
         process.setProgram(YTDLP)
-        process.setArguments(["--no-warnings", "--flat-playlist", "--dump-single-json", target])
+        process.setArguments(ytdlp_arguments(arguments))
         process.finished.connect(lambda code, status, p=process: self.search_finished(p, code, status))
         process.errorOccurred.connect(lambda _err, p=process: self.search_error(p))
         process.start()
@@ -1215,16 +1515,47 @@ class MainWindow(QMainWindow):
                 self.status.setText("Beranda belum mendapat hasil pencarian publik. Periksa koneksi atau yt-dlp.")
             elif self.feed_mode == "trending":
                 self.status.setText("Pencarian video populer Indonesia gagal. Periksa koneksi atau yt-dlp.")
+            elif self.search_kind == "channels":
+                self.status.setText("Pencarian channel gagal. Periksa koneksi atau pembaruan yt-dlp.")
+                if err.strip():
+                    QMessageBox.warning(self, APP_NAME, err[-1200:])
             else:
                 self.status.setText("Pencarian gagal. Periksa koneksi / yt-dlp.")
                 if err.strip():
                     QMessageBox.warning(self, APP_NAME, err[-1200:])
-            self.search_button.setEnabled(True)
             return
         try:
             data = json.loads(raw)
-            for entry in (data.get("entries") or [data]):
-                if not entry:
+            entries = data.get("entries") or [data]
+            if self.search_kind == "channels":
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    url = channel_page_url(entry)
+                    if not url:
+                        continue
+                    name = entry.get("channel") or entry.get("uploader") or entry.get("title")
+                    if not name:
+                        continue
+                    self.results.append({
+                        "kind": "channel", "url": url, "title": name,
+                        "channel": name,
+                        "subscribers": format_subscriber_count(entry.get("channel_follower_count")),
+                        "description": entry.get("description") or "",
+                        "channel_avatar": channel_avatar_url(entry),
+                    })
+                if not self.results:
+                    self.status.setText("Tidak ada channel yang ditemukan. Coba kata kunci lain.")
+                    return
+                self.render_page()
+                self.results_heading.setText(f"HASIL CHANNEL  •  {len(self.results)} ditemukan")
+                self.status.setText(
+                    f"{len(self.results)} channel ditemukan. Halaman channel akan disiapkan pada tahap berikutnya."
+                )
+                return
+
+            for entry in entries:
+                if not isinstance(entry, dict):
                     continue
                 url = video_url(entry)
                 if not url:
@@ -1232,8 +1563,12 @@ class MainWindow(QMainWindow):
                 duration = entry.get("duration")
                 duration_text = f"{int(duration)//60}:{int(duration)%60:02d}" if duration else ""
                 self.results.append({
-                    "url": url, "title": entry.get("title") or "Video tanpa judul",
+                    "kind": "video", "url": url, "title": entry.get("title") or "Video tanpa judul",
                     "channel": entry.get("channel") or entry.get("uploader") or "YouTube",
+                    "channel_id": entry.get("channel_id") or "",
+                    "channel_url": channel_page_url(entry),
+                    "channel_avatar": channel_avatar_url(entry),
+                    "subscribers": format_subscriber_count(entry.get("channel_follower_count")),
                     "view_count": format_view_count(entry.get("view_count")),
                     "thumbnail": thumbnail_url(entry), "duration": duration_text,
                     "duration_seconds": float(duration or 0),
@@ -1260,33 +1595,78 @@ class MainWindow(QMainWindow):
             self.status.setText(f"Format hasil tidak dikenali: {exc}")
 
     def render_page(self):
+        if self.search_kind == "channels":
+            self.render_channel_page()
+            return
         self.clear_cards()
         total_pages = max(1, (len(self.results) + self.page_size - 1) // self.page_size)
         self.current_page = max(0, min(self.current_page, total_pages - 1))
         start = self.current_page * self.page_size
         end = min(len(self.results), start + self.page_size)
-        # Keep Recommended, Trending, and Search visually consistent.
         columns = 2
         for idx in range(start, end):
             result = self.results[idx]
             card = VideoCard(idx, result["title"], result["channel"], result["duration"],
-                             result.get("view_count", ""), self.cards_host)
+                             result.get("view_count", ""), result.get("channel_avatar", ""), self.cards_host)
             card.setMinimumHeight(250)
             card.on_activate = self.play_index
             card.installEventFilter(self)
             self.cards.append(card)
             self.cards_grid.addWidget(card, (idx-start)//columns, (idx-start)%columns)
-            if result["thumbnail"]:
+            if result.get("thumbnail"):
                 self.thumbnail_cards[result["thumbnail"]] = card
                 self.thumbnail_queue.append((result["thumbnail"], card))
+            if result.get("channel_avatar"):
+                self.avatar_queue.append((result["channel_avatar"], card))
+            elif result.get("channel_url"):
+                self.channel_avatar_lookup_queue.append((result["channel_url"], card))
         self.page_label.setText(f"{self.current_page + 1} / {total_pages}")
         self.prev_page_button.setEnabled(self.current_page > 0)
         self.next_page_button.setEnabled(self.current_page + 1 < total_pages)
         self.results_heading.setText(f"HASIL VIDEO  •  {start + 1 if end else 0}–{end} dari {len(self.results)}")
         self.refresh_card_columns()
         self.load_next_thumbnail()
+        self.load_next_avatar()
+        self.load_next_channel_avatar_lookup()
         if self.cards:
             self.cards[0].setFocus()
+
+    def render_channel_page(self):
+        self.clear_cards()
+        self.thumbnail_queue.clear()
+        total_pages = max(1, (len(self.results) + self.page_size - 1) // self.page_size)
+        self.current_page = max(0, min(self.current_page, total_pages - 1))
+        start = self.current_page * self.page_size
+        end = min(len(self.results), start + self.page_size)
+        for idx in range(start, end):
+            result = self.results[idx]
+            card = ChannelCard(
+                idx, result.get("title", ""), result.get("subscribers", ""),
+                result.get("description", ""), result.get("channel_avatar", ""), self.cards_host
+            )
+            card.on_activate = self.open_channel_preview
+            card.installEventFilter(self)
+            self.cards.append(card)
+            self.cards_grid.addWidget(card, (idx-start)//2, (idx-start)%2)
+            if result.get("channel_avatar"):
+                self.avatar_queue.append((result["channel_avatar"], card))
+        self.page_label.setText(f"{self.current_page + 1} / {total_pages}")
+        self.prev_page_button.setEnabled(self.current_page > 0)
+        self.next_page_button.setEnabled(self.current_page + 1 < total_pages)
+        self.results_heading.setText(f"HASIL CHANNEL  •  {start + 1 if end else 0}–{end} dari {len(self.results)}")
+        self.refresh_card_columns()
+        self.load_next_avatar()
+        if self.cards:
+            self.cards[0].setFocus()
+
+    def open_channel_preview(self, index):
+        if not 0 <= int(index) < len(self.results):
+            return
+        channel = self.results[int(index)]
+        self.status.setText(
+            f"Channel dipilih: {channel.get('title', 'Channel')}. "
+            "Halaman Channel akan ditambahkan pada tahap berikutnya."
+        )
 
     def load_next_thumbnail(self):
         while self.thumbnail_active < 3 and self.thumbnail_queue:
@@ -1309,6 +1689,79 @@ class MainWindow(QMainWindow):
                 card.set_thumbnail(pixmap)
         reply.deleteLater()
         self.load_next_thumbnail()
+
+    def load_next_avatar(self):
+        while self.avatar_active < 2 and self.avatar_queue:
+            url, card = self.avatar_queue.pop(0)
+            if card not in self.cards:
+                continue
+            request = QNetworkRequest(QUrl(url))
+            request.setTransferTimeout(6000)
+            reply = self.network.get(request)
+            self.avatar_active += 1
+            self.avatar_replies.add(reply)
+            reply.finished.connect(lambda r=reply, c=card: self.avatar_loaded(r, c))
+
+    def load_next_channel_avatar_lookup(self):
+        if self.process_is_running(self.channel_avatar_lookup_process):
+            return
+        while self.channel_avatar_lookup_queue:
+            url, card = self.channel_avatar_lookup_queue.pop(0)
+            if card not in self.cards:
+                continue
+            process = QProcess(self)
+            self.channel_avatar_lookup_process = process
+            process.setProgram(YTDLP)
+            process.setArguments(ytdlp_arguments([
+                "--no-warnings", "--socket-timeout", "10", "--skip-download",
+                "--flat-playlist", "--playlist-items", "1", "--dump-single-json", url,
+            ]))
+            process.finished.connect(
+                lambda code, _status, p=process, c=card: self.channel_avatar_lookup_finished(p, c, code)
+            )
+            process.errorOccurred.connect(
+                lambda _error, p=process: self.channel_avatar_lookup_error(p)
+            )
+            process.start()
+            return
+
+    def channel_avatar_lookup_error(self, process):
+        if process is self.channel_avatar_lookup_process:
+            self.channel_avatar_lookup_process = None
+            process.deleteLater()
+            self.load_next_channel_avatar_lookup()
+
+    def channel_avatar_lookup_finished(self, process, card, exit_code):
+        if process is not self.channel_avatar_lookup_process:
+            process.deleteLater()
+            return
+        self.channel_avatar_lookup_process = None
+        if exit_code == 0 and card in self.cards:
+            try:
+                data = json.loads(bytes(process.readAllStandardOutput()).decode("utf-8", "replace"))
+                avatar = channel_avatar_url(data)
+                if not avatar:
+                    entries = data.get("entries") or []
+                    if entries and isinstance(entries[0], dict):
+                        avatar = channel_avatar_url(entries[0])
+                if avatar:
+                    card.channel_avatar_url = avatar
+                    self.avatar_queue.append((avatar, card))
+                    self.load_next_avatar()
+            except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+                pass
+        process.deleteLater()
+        self.load_next_channel_avatar_lookup()
+
+    def avatar_loaded(self, reply, card):
+        self.avatar_active = max(0, self.avatar_active - 1)
+        self.avatar_replies.discard(reply)
+        if card in self.cards and reply.error() == reply.NetworkError.NoError:
+            pixmap = QPixmap()
+            if pixmap.loadFromData(reply.readAll()):
+                card.set_channel_avatar(pixmap)
+        reply.deleteLater()
+        self.load_next_avatar()
 
     def change_page_size(self, value):
         self.page_size = int(value)
@@ -1348,6 +1801,8 @@ class MainWindow(QMainWindow):
             return False
 
     def quality_fallbacks(self, quality):
+        if quality == "1080p":
+            return ["720p", "480p", "Auto"]
         if quality == "720p":
             return ["480p", "Auto"]
         if quality == "480p":
@@ -1381,6 +1836,8 @@ class MainWindow(QMainWindow):
         self.playback_paused = False
         self.update_play_pause_icons()
         self.fallback_qualities = self.quality_fallbacks(self.quality.currentText())
+        self.current_hwdec = MPV_HWDEC
+        self.decoder_fallbacks = list(MPV_HWDEC_FALLBACKS)
         self.metadata_requested_index = None
         video = self.playback_queue[index]
         self.player_title.setText(video["title"])
@@ -1388,6 +1845,21 @@ class MainWindow(QMainWindow):
         channel = video.get("channel") or "YouTube"
         duration = video.get("duration") or ""
         self.current_channel = channel
+        self.current_channel_url = video.get("channel_url") or ""
+        self.current_channel_avatar = video.get("channel_avatar") or ""
+        self.current_channel_subscribers = video.get("subscribers") or ""
+        self.channel_profile_button.setText(
+            channel + (f"  ·  {self.current_channel_subscribers}" if self.current_channel_subscribers else "")
+        )
+        self.channel_profile_button.setEnabled(bool(self.current_channel_url))
+        self.channel_profile_button.setIcon(QIcon())
+        if self.current_channel_avatar:
+            self.load_playback_channel_avatar(self.current_channel_avatar, index)
+        self.description_expanded = False
+        self.description_expand_button.setText("Perbesar")
+        self.video_frame.setMaximumHeight(16777215)
+        self.video_surface.setMinimumSize(300, 170)
+        self.side_panel.setMaximumHeight(112)
         self.current_duration_label = duration
         self.player_views_label.setText(video.get("view_count") or "")
         self.player_views_label.setVisible(bool(video.get("view_count")))
@@ -1425,7 +1897,12 @@ class MainWindow(QMainWindow):
         self.player_process = None
         self.dispose_mpv_event_socket()
         if self.process_is_running(old_process):
-            old_process.kill()
+            # Wait for the previous MPV to release the video window and IPC socket
+            # before launching its replacement after a quality change.
+            old_process.terminate()
+            if not old_process.waitForFinished(900):
+                old_process.kill()
+                old_process.waitForFinished(900)
         self.ipc_path = f"/tmp/roxy-youtube-tv-{os.getpid()}-{self.current_index}.sock"
         try:
             Path(self.ipc_path).unlink(missing_ok=True)
@@ -1435,19 +1912,23 @@ class MainWindow(QMainWindow):
         self.player_process = process
         # Attach MPV to the native Qt child window; do not create a separate
         # top-level MPV window. HG680P's verified audible ALSA route is dmix.
-        args = ["--no-osc", "--vo=x11", f"--wid={int(self.video_surface.winId())}",
-                # Never let MPV consume the TV remote; Roxy handles D-pad keys
-                # and sends explicit playback commands over MPV IPC.
+        args = ["--no-osc", f"--vo={MPV_VO}",
+                f"--gpu-context={MPV_GPU_CONTEXT}", f"--gpu-api={MPV_GPU_API}",
+                f"--hwdec={self.current_hwdec}", "--hwdec-codecs=h264",
+                f"--wid={int(self.video_surface.winId())}",
+                # Keep MPV embedded in the Qt child window. Qt remains responsible
+                # for Safe Area geometry; MPV never takes over the display.
+                # RoxyTube owns D-pad input and sends playback commands over IPC.
                 "--input-vo-keyboard=no", "--input-default-bindings=no",
                 f"--volume={self.volume_slider.value()}",
                 "--ao=alsa",
                 "--audio-device=alsa/dmix:CARD=S905XP212,DEV=0",
                 f"--input-ipc-server={self.ipc_path}",
                 f"--ytdl-format={QUALITY_FORMATS[self.quality.currentText()]}",
-                # Keep subtitle enumeration out of the startup path while ranking formats
-                # toward the requested resolution ceiling.
-                f"--ytdl-raw-options=sub-langs=none,format-sort=res:{self.quality.currentText().replace('p', '') if self.quality.currentText() != 'Auto' else '1080'}",
+                f"--ytdl-raw-options={mpv_ytdl_raw_options(self.quality.currentText())}",
                 "--keep-open=no"]
+        if MPV_GPU_HWDEC_INTEROP and self.current_hwdec == "v4l2m2m":
+            args.append(f"--gpu-hwdec-interop={MPV_GPU_HWDEC_INTEROP}")
         if self.current_time_pos > 0.5:
             args.append(f"--start={self.current_time_pos:.2f}")
         if self.playback_paused:
@@ -1455,6 +1936,7 @@ class MainWindow(QMainWindow):
         args.append(self.playback_queue[self.current_index]["url"])
         process.setProgram(MPV)
         process.setArguments(args)
+        process.setProcessEnvironment(mpv_process_environment())
         process.started.connect(lambda p=process: self.player_started(p))
         process.finished.connect(lambda code, _status, p=process: self.player_finished(p, code))
         process.errorOccurred.connect(lambda _err, p=process: self.player_error(p))
@@ -1610,16 +2092,22 @@ class MainWindow(QMainWindow):
         )
 
     def retry_lower_quality(self, process, reason):
-        if (process is not self.player_process or self.playback_started or
-                not self.fallback_qualities):
+        if process is not self.player_process or self.playback_started:
             return False
-        next_quality = self.fallback_qualities.pop(0)
         self.set_mini_controls_enabled(False)
         self.player_process = None
-        self.quality.blockSignals(True)
-        self.quality.setCurrentText(next_quality)
-        self.quality.blockSignals(False)
-        self.player_status.setText(f"{reason} Mencoba {next_quality}…")
+        if self.decoder_fallbacks:
+            next_decoder = self.decoder_fallbacks.pop(0)
+            self.current_hwdec = next_decoder
+            self.player_status.setText(f"{reason} Mencoba decoder {next_decoder}…")
+        elif self.fallback_qualities:
+            next_quality = self.fallback_qualities.pop(0)
+            self.quality.blockSignals(True)
+            self.quality.setCurrentText(next_quality)
+            self.quality.blockSignals(False)
+            self.player_status.setText(f"{reason} Mencoba {next_quality}…")
+        else:
+            return False
         try:
             process.deleteLater()
         except RuntimeError:
@@ -1687,10 +2175,58 @@ class MainWindow(QMainWindow):
         process = QProcess(self)
         self.metadata_process = process
         process.setProgram(YTDLP)
-        process.setArguments(["--no-warnings", "--skip-download", "--no-playlist",
-                              "--dump-single-json", self.playback_queue[index]["url"]])
+        process.setArguments(ytdlp_arguments(["--no-warnings", "--skip-download", "--no-playlist",
+                              "--dump-single-json", self.playback_queue[index]["url"]]))
         process.finished.connect(lambda code, _status, p=process, i=index: self.metadata_finished(p, i, code))
         process.start()
+
+    def load_playback_channel_avatar(self, url, index):
+        previous = self.channel_profile_reply
+        if previous is not None:
+            try:
+                previous.abort()
+            except RuntimeError:
+                pass
+        request = QNetworkRequest(QUrl(url))
+        request.setTransferTimeout(6000)
+        reply = self.network.get(request)
+        self.channel_profile_reply = reply
+        reply.finished.connect(lambda r=reply, i=index: self.playback_channel_avatar_loaded(r, i))
+
+    def playback_channel_avatar_loaded(self, reply, index):
+        if reply is self.channel_profile_reply:
+            self.channel_profile_reply = None
+        if index == self.current_index and reply.error() == reply.NetworkError.NoError:
+            pixmap = QPixmap()
+            if pixmap.loadFromData(reply.readAll()):
+                self.channel_profile_button.setIcon(QIcon(circular_avatar(pixmap, 28)))
+        reply.deleteLater()
+
+    def open_current_channel(self):
+        if not self.playback_queue:
+            return
+        self.player_status.setText(
+            f"Channel dipilih: {self.current_channel}. "
+            "Halaman Channel akan dibuat pada tahap berikutnya."
+        )
+
+    def toggle_description_expanded(self):
+        self.description_expanded = not self.description_expanded
+        if self.description_expanded:
+            self.show_side_panel("description")
+            self.video_frame.setMaximumHeight(155)
+            self.video_surface.setMinimumSize(260, 90)
+            self.side_panel.setMaximumHeight(260)
+            self.description_expand_button.setText("Normal")
+            self.description_expand_button.setToolTip("Kembalikan ukuran pemutar")
+            if getattr(self, "description_label", None) is not None:
+                self.description_label.setFocus(Qt.OtherFocusReason)
+        else:
+            self.video_frame.setMaximumHeight(16777215)
+            self.video_surface.setMinimumSize(300, 170)
+            self.side_panel.setMaximumHeight(112)
+            self.description_expand_button.setText("Perbesar")
+            self.description_expand_button.setToolTip("Perbesar area deskripsi dan lipat video")
 
     def metadata_finished(self, process, index, exit_code):
         if process is not self.metadata_process or index != self.current_index or exit_code != 0:
@@ -1708,6 +2244,24 @@ class MainWindow(QMainWindow):
             self.playback_queue[index]["view_count"] = view_count
             self.player_views_label.setText(view_count)
             self.player_views_label.setVisible(not self.is_playback_fullscreen)
+        channel_name = data.get("channel") or data.get("uploader") or self.current_channel
+        channel_url = channel_page_url(data) or self.current_channel_url
+        channel_avatar = channel_avatar_url(data) or self.current_channel_avatar
+        subscribers = format_subscriber_count(data.get("channel_follower_count")) or self.current_channel_subscribers
+        self.current_channel = channel_name
+        self.current_channel_url = channel_url
+        self.current_channel_avatar = channel_avatar
+        self.current_channel_subscribers = subscribers
+        self.playback_queue[index].update({
+            "channel": channel_name, "channel_url": channel_url,
+            "channel_avatar": channel_avatar, "subscribers": subscribers,
+        })
+        self.channel_profile_button.setText(
+            channel_name + (f"  ·  {subscribers}" if subscribers else "")
+        )
+        self.channel_profile_button.setEnabled(bool(channel_url))
+        if channel_avatar:
+            self.load_playback_channel_avatar(channel_avatar, index)
         description = data.get("description") or self.playback_queue[index].get("description") or "Deskripsi tidak tersedia."
         self.playback_queue[index]["description"] = description
         self.show_side_panel("description", description)
@@ -2023,6 +2577,7 @@ class MainWindow(QMainWindow):
         self.showFullScreen()
         self.player_header_widget.hide()
         self.player_meta.hide()
+        self.channel_profile_button.hide()
         self.player_views_label.hide()
         self.player_duration_label.hide()
         self.resolution_label.hide()
@@ -2053,7 +2608,8 @@ class MainWindow(QMainWindow):
                 geometry = self._restore_geometry
                 QTimer.singleShot(0, lambda: self.setGeometry(geometry))
         self.player_header_widget.show()
-        self.player_meta.show()
+        self.player_meta.hide()
+        self.channel_profile_button.show()
         self.player_views_label.setVisible(bool(self.player_views_label.text()))
         self.player_duration_label.setVisible(bool(self.player_duration_label.text()))
         self.resolution_label.show()
@@ -2171,6 +2727,45 @@ class MainWindow(QMainWindow):
                 pass
         if event.type() == QEvent.KeyPress:
             key, focus = event.key(), QApplication.focusWidget()
+            activation_keys = (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select)
+
+            # TV remotes often send Key_Select rather than Return/Enter.
+            # Open combo popups on the first OK; commit the highlighted row on the next.
+            combos = (getattr(self, "quality", None), getattr(self, "subtitle_box", None))
+            combo = next((
+                candidate for candidate in combos if candidate is not None and (
+                    focus is candidate or watched is candidate
+                    or watched is candidate.view() or watched is candidate.view().viewport()
+                    or watched is candidate.view().window()
+                    or focus is candidate.view().window()
+                    or (isinstance(focus, QWidget) and candidate.view().isAncestorOf(focus))
+                )
+            ), None)
+            if combo is not None:
+                if combo.view().isVisible():
+                    if key in activation_keys:
+                        index = combo.view().currentIndex()
+                        if index.isValid():
+                            combo.setCurrentIndex(index.row())
+                        combo.hidePopup()
+                        event.accept()
+                        return True
+                    if key in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right):
+                        return False
+                elif focus is combo and key in activation_keys:
+                    combo.showPopup()
+                    event.accept()
+                    return True
+
+            # Window controls live on the search page, outside the playback-only
+            # activation list below, so activate them explicitly with the remote OK.
+            if key in activation_keys and focus in (
+                getattr(self, "minimize_button", None), getattr(self, "close_button", None)
+            ):
+                focus.click()
+                event.accept()
+                return True
+
             if key == Qt.Key_Space and isinstance(watched, QPushButton):
                 return True
             if (self.pages.currentWidget() == self.player_page
@@ -2180,7 +2775,8 @@ class MainWindow(QMainWindow):
                         self.back_button, self.previous_video_button, self.rewind_button,
                         self.play_pause_button, self.fast_forward_button,
                         self.next_video_button, self.stop_button, self.fullscreen_button,
-                        self.playlist_button, self.description_button
+                        self.playlist_button, self.description_button,
+                        self.description_expand_button, self.channel_profile_button
                     ) or focus in self.playlist_items)):
                 focus.click()
                 return True
@@ -2228,8 +2824,15 @@ class MainWindow(QMainWindow):
                         self.play_pause_button.setFocus(Qt.OtherFocusReason); return True
                     if key in (Qt.Key_Up, Qt.Key_Left, Qt.Key_Right):
                         return True
-                if focus is self.player_page and key == Qt.Key_Down:
-                    self.seek_slider.setFocus(Qt.OtherFocusReason); return True
+                if focus in (self.player_page, self.video_surface) and key == Qt.Key_Down:
+                    self.channel_profile_button.setFocus(Qt.OtherFocusReason); return True
+                if focus is self.channel_profile_button:
+                    if key == Qt.Key_Up:
+                        self.player_page.setFocus(Qt.OtherFocusReason); return True
+                    if key == Qt.Key_Down:
+                        self.seek_slider.setFocus(Qt.OtherFocusReason); return True
+                    if key in (Qt.Key_Left, Qt.Key_Right):
+                        return True
                 if focus is self.player_page and key in (Qt.Key_Up, Qt.Key_Left, Qt.Key_Right):
                     return True
                 if key in (Qt.Key_Escape, Qt.Key_Back):
@@ -2257,7 +2860,7 @@ class MainWindow(QMainWindow):
                         if focus is self.volume_slider:
                             self.seek_slider.setFocus()
                         else:
-                            self.back_button.setFocus()
+                            self.channel_profile_button.setFocus()
                         return True
                 if focus in (self.previous_video_button, self.rewind_button,
                              self.play_pause_button, self.fast_forward_button,
@@ -2348,11 +2951,13 @@ class MainWindow(QMainWindow):
                         self.subtitle_box.setFocus(Qt.OtherFocusReason); return True
                     if key in (Qt.Key_Up, Qt.Key_Down):
                         return True
-                if focus in (self.playlist_button, self.description_button):
+                if focus in (self.playlist_button, self.description_button, self.description_expand_button):
+                    side_buttons = [self.playlist_button, self.description_button, self.description_expand_button]
+                    pos = side_buttons.index(focus)
                     if key == Qt.Key_Left:
-                        self.playlist_button.setFocus(Qt.OtherFocusReason); return True
+                        side_buttons[max(0, pos - 1)].setFocus(Qt.OtherFocusReason); return True
                     if key == Qt.Key_Right:
-                        self.description_button.setFocus(Qt.OtherFocusReason); return True
+                        side_buttons[min(len(side_buttons) - 1, pos + 1)].setFocus(Qt.OtherFocusReason); return True
                     if key == Qt.Key_Up:
                         self.subtitle_box.setFocus(Qt.OtherFocusReason); return True
                     if key == Qt.Key_Down:
@@ -2361,8 +2966,11 @@ class MainWindow(QMainWindow):
                                 self.show_side_panel("playlist")
                             if self.playlist_items:
                                 self.playlist_items[0].setFocus(Qt.OtherFocusReason)
-                        elif focus is self.description_button and getattr(self, "description_label", None) is not None:
-                            self.description_label.setFocus(Qt.OtherFocusReason)
+                        elif focus in (self.description_button, self.description_expand_button):
+                            if focus is self.description_expand_button and not self.description_expanded:
+                                self.toggle_description_expanded()
+                            if getattr(self, "description_label", None) is not None:
+                                self.description_label.setFocus(Qt.OtherFocusReason)
                         return True
                 if key == Qt.Key_Left and focus is self.subtitle_box:
                     self.quality.setFocus()
@@ -2457,7 +3065,7 @@ class MainWindow(QMainWindow):
                         return True
                     if key == Qt.Key_Right:
                         self.collapse_sidebar()
-                        if self.feed_mode == "search":
+                        if self.feed_mode in ("search", "channels"):
                             self.keyboard_button.setFocus()
                         elif self.cards:
                             self.cards[0].setFocus()
@@ -2503,9 +3111,13 @@ class MainWindow(QMainWindow):
                         self.keyboard_button.setFocus(Qt.OtherFocusReason)
                         return True
                     if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
-                        # Use the card's absolute results index, not its position
-                        # inside the current page's self.cards list.
-                        self.play_index(focus.index); return True
+                        # Use the absolute result index, not the current page-local
+                        # position. Channel cards open the channel destination later.
+                        if self.search_kind == "channels":
+                            self.open_channel_preview(focus.index)
+                        else:
+                            self.play_index(focus.index)
+                        return True
                 if focus is self.query and key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Select):
                     self.set_keyboard_visible(True)
                     if self.keyboard.buttons:
@@ -2522,7 +3134,8 @@ class MainWindow(QMainWindow):
                 if focus is self.keyboard_button:
                     if key == Qt.Key_Left:
                         self.expand_sidebar()
-                        self.nav_buttons[1].setFocus(); return True
+                        active = self.nav_modes.index(self.feed_mode) if self.feed_mode in self.nav_modes else 1
+                        self.nav_buttons[active].setFocus(); return True
                     if key == Qt.Key_Right:
                         self.query.setFocus(); return True
                     if key == Qt.Key_Up:
@@ -2664,7 +3277,8 @@ class MainWindow(QMainWindow):
                 return
         self.mini_title_timer.stop()
         self.fullscreen_hide_timer.stop()
-        for process in (self.search_process, self.player_process, self.metadata_process):
+        for process in (self.search_process, self.player_process, self.metadata_process,
+                        self.channel_avatar_lookup_process):
             if self.process_is_running(process):
                 process.terminate()
                 if not process.waitForFinished(500):
