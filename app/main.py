@@ -10,7 +10,7 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDi
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea,
-    QProgressBar, QSizePolicy, QSlider, QStackedWidget, QStyle, QVBoxLayout, QWidget,
+    QProgressBar, QSpinBox, QSizePolicy, QSlider, QStackedWidget, QStyle, QVBoxLayout, QWidget,
 )
 
 APP_NAME = "YouTube Roxy"
@@ -134,6 +134,38 @@ def safe_area_pixel_margins(screen_width, screen_height):
         return values
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return defaults
+
+
+def save_safe_area_pixel_profile(screen_width, screen_height, margins):
+    """Atomically save one resolution-specific pixel profile."""
+    resolution = f"{int(screen_width)}x{int(screen_height)}"
+    try:
+        if WINDOW_SAFE_AREA_FILE.exists():
+            data = json.loads(WINDOW_SAFE_AREA_FILE.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or data.get("version") != 1:
+                return False
+            profiles = data.get("profiles")
+            if not isinstance(profiles, dict):
+                return False
+        else:
+            data = {"version": 1, "profiles": {}}
+            profiles = data["profiles"]
+        values = {key: int(margins[key]) for key in ("left", "top", "right", "bottom")}
+        if any(value < 0 for value in values.values()):
+            return False
+        if values["left"] + values["right"] >= int(screen_width):
+            return False
+        if values["top"] + values["bottom"] >= int(screen_height):
+            return False
+        profiles[resolution] = values
+        WINDOW_SAFE_AREA_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temporary = WINDOW_SAFE_AREA_FILE.with_suffix(".tmp")
+        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\\n",
+                             encoding="utf-8")
+        temporary.replace(WINDOW_SAFE_AREA_FILE)
+        return True
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return False
 
 
 def load_app_settings():
@@ -1077,6 +1109,39 @@ class MainWindow(QMainWindow):
         self.page_size_box.setMinimumWidth(100)
         self.page_size_box.currentTextChanged.connect(self.change_page_size)
         settings_layout.addWidget(self.page_size_box, 0, Qt.AlignLeft)
+
+        safe_area_title = QLabel("Safe Area layar (piksel)")
+        settings_layout.addWidget(safe_area_title)
+        screen = self.screen() or QApplication.primaryScreen()
+        screen_bounds = screen.geometry() if screen is not None else QRect(0, 0, 720, 576)
+        self.safe_area_resolution = (screen_bounds.width(), screen_bounds.height())
+        initial_margins = safe_area_pixel_margins(*self.safe_area_resolution)
+        safe_area_grid = QGridLayout()
+        self.safe_area_spinboxes = {}
+        for index, (key, label) in enumerate((
+            ("left", "Kiri"), ("right", "Kanan"),
+            ("top", "Atas"), ("bottom", "Bawah"),
+        )):
+            row, column = divmod(index, 2)
+            safe_area_grid.addWidget(QLabel(label), row, column * 2)
+            spin = QSpinBox()
+            spin.setRange(0, max(0, (screen_bounds.width() if key in ("left", "right")
+                                     else screen_bounds.height()) - 1))
+            spin.setValue(initial_margins[key])
+            spin.setMinimumWidth(78)
+            spin.setFocusPolicy(Qt.StrongFocus)
+            self.safe_area_spinboxes[key] = spin
+            safe_area_grid.addWidget(spin, row, column * 2 + 1)
+        settings_layout.addLayout(safe_area_grid)
+        self.safe_area_save_button = QPushButton("Simpan & Terapkan Safe Area")
+        self.safe_area_save_button.clicked.connect(self.save_safe_area_settings)
+        settings_layout.addWidget(self.safe_area_save_button, 0, Qt.AlignLeft)
+        self.safe_area_status = QLabel(
+            f"Profil {self.safe_area_resolution[0]}×{self.safe_area_resolution[1]} · nilai dalam piksel"
+        )
+        self.safe_area_status.setObjectName("hint")
+        self.safe_area_status.setWordWrap(True)
+        settings_layout.addWidget(self.safe_area_status)
         settings_layout.addStretch(1)
         self.pages.addWidget(self.settings_page)
 
@@ -1820,6 +1885,20 @@ class MainWindow(QMainWindow):
                 card.set_channel_avatar(pixmap)
         reply.deleteLater()
         self.load_next_avatar()
+
+    def save_safe_area_settings(self):
+        width, height = self.safe_area_resolution
+        margins = {key: spin.value() for key, spin in self.safe_area_spinboxes.items()}
+        if not save_safe_area_pixel_profile(width, height, margins):
+            self.safe_area_status.setText("Profil tidak valid atau gagal disimpan; konfigurasi lama dipertahankan.")
+            return
+        if not self.apply_safe_window_geometry():
+            self.safe_area_status.setText("Profil tersimpan, tetapi area aman terlalu kecil untuk ukuran minimum jendela.")
+            return
+        self.safe_area_status.setText(
+            f"Safe Area diterapkan: {margins['left']}/{margins['top']}/"
+            f"{margins['right']}/{margins['bottom']} px (Kiri/Atas/Kanan/Bawah)."
+        )
 
     def change_page_size(self, value):
         self.page_size = int(value)
