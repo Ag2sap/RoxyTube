@@ -51,6 +51,16 @@ The experimental `feat/mpv-drmprime-ytdlp` branch uses MPV's GPU renderer throug
 
 This is **not yet DRM PRIME zero-copy**. DRM PRIME requires an FFmpeg V4L2 build that exports DMA-BUF frames and an MPV interop path that can consume them. See [the DRM PRIME and yt-dlp plan](docs/drmprime-ytdlp-plan.md) for compatibility notes, build steps, and device acceptance tests.
 
+The DRM PRIME runtime is experimental and opt-in. After downloading the ARM64 GitHub Actions artifact, install it with:
+
+    sh scripts/install-drmprime-runtime.sh /path/to/roxytube-mpv-drmprime-aarch64.tar.gz
+
+Launch the experimental player path with:
+
+    ROXY_ENABLE_DRMPRIME=1 sh scripts/run.sh
+
+Normal startup continues to use the system MPV unless the opt-in variable is set.
+
 Optional runtime overrides:
 
 - `ROXY_YT_DLP`: explicit yt-dlp executable
