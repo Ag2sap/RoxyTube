@@ -4,7 +4,15 @@ on:
   push:
     branches:
       - feat/mpv-drmprime-ytdlp
+    paths:
+      - 'scripts/build-drmprime-runtime.sh'
+      - 'scripts/check-drmprime-patch.sh'
+      - '.github/workflows/build-drmprime-runtime.yml'
   workflow_dispatch:
+
+concurrency:
+  group: roxytube-drmprime-build-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
