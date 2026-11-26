@@ -20,7 +20,9 @@ A lightweight YouTube TV-style frontend for HG680P / Armbian Noble (ARM64).
 - PlasmaTube-inspired watch page with embedded MPV, a timeline directly below the video, 10-second rewind/forward, playback controls, and a lower queue/description panel.
 - D-pad navigation across the timeline, playback controls, queue items, and scrollable description.
 - Subtitle choices are enumerated after playback starts; original/manual captions and automatic captions are listed separately when available, with a supported subtitle format selected for each language. The selected track is applied to the active MPV session.
-- Quality preference: Auto, 360p, 480p, or 720p (limited by formats YouTube exposes). A quality change restarts the stream at the current playback position and reapplies the selected subtitle. The watch page reports MPV's actual decoded stream dimensions so a 720p maximum preference is not mistaken for a guaranteed 720p source.
+- Quality preference: Auto, 360p, 480p, 720p, or 1080p (limited by formats YouTube exposes). A quality change restarts the stream at the current playback position and reapplies the selected subtitle. The watch page reports MPV's actual decoded stream dimensions so a maximum preference is not mistaken for a guaranteed source resolution.
+- RoxyTube isolates yt-dlp from the user's global config. An optional app-specific config can be placed at `~/.config/roxy-youtube-tv/yt-dlp.conf`; search, Channel lookup, metadata and MPV's ytdl hook share the same isolation policy.
+- MPV remains embedded in the Qt video surface. The normal path uses GPU/X11 EGL with `v4l2m2m-copy`; a separate app-local DRM PRIME MPV runtime is opt-in and retries `v4l2m2m-copy`, then software decoding if the primary decoder fails.
 - Automatic next-video playback follows the current result/queue order.
 - Fullscreen playback hides surrounding UI; the timeline and controls reappear on mouse movement near the bottom or D-pad Down, then auto-hide after one second of inactivity.
 - Back from playback returns to the Home/results page while audio playback continues; no floating video window is shown. A bordered mini-player in the Home header shows the scrolling title, progress, and remote-friendly controls; selecting its title returns to the active video without restarting it.
@@ -39,7 +41,19 @@ Run as the normal desktop user (HG680P: roxy), not root. Device deployment uses 
 
 ## Run
 
+Install the latest official yt-dlp ARM64 binary (as user `roxy`, no sudo):
+
+    sh scripts/install-yt-dlp.sh
+
+Then launch:
+
     sh scripts/run.sh
+
+RoxyTube ignores `~/.config/yt-dlp/config` so external extractor arguments cannot silently constrain the app. Optional app-only yt-dlp options belong in `~/.config/roxy-youtube-tv/yt-dlp.conf`. This file is not created or modified by the installer.
+
+The isolated DRM PRIME runtime is built and installed separately. It is never selected unless explicitly launched with:
+
+    ROXY_ENABLE_DRMPRIME=1 sh scripts/run.sh
 
 ## Safe Area
 
