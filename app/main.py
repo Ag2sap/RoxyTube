@@ -3,7 +3,7 @@
 from __future__ import annotations
 import json, os, shutil, sys
 from pathlib import Path
-from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve, QSize, QRect
+from PySide6.QtCore import Qt, QEvent, QProcess, QProcessEnvironment, QUrl, QTimer, QPropertyAnimation, QEasingCurve, QSize, QRect
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QIcon, QPainterPath
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDiskCache, QLocalSocket, QLocalServer
 from PySide6.QtWidgets import (
@@ -17,14 +17,47 @@ CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 SAFE_AREA_FILE = CONFIG_DIR / "roxy-display" / "safe-area.json"
 SETTINGS_FILE = CONFIG_DIR / "roxy-youtube-tv" / "settings.json"
 CACHE_DIR = Path.home() / ".cache" / "roxy-youtube-tv" / "thumbnails"
-YTDLP = os.environ.get("ROXY_YT_DLP", "yt-dlp")
+APP_DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "roxy-youtube-tv"
+APP_YTDLP = APP_DATA_DIR / "bin" / "yt-dlp"
+
+
+def resolve_ytdlp():
+    """Prefer RoxyTube's verified app-local yt-dlp, then an explicit override/PATH."""
+    override = os.environ.get("ROXY_YT_DLP")
+    if override:
+        return override
+    if APP_YTDLP.is_file() and os.access(APP_YTDLP, os.X_OK):
+        return str(APP_YTDLP)
+    return shutil.which("yt-dlp") or "yt-dlp"
+
+
+YTDLP = resolve_ytdlp()
 MPV = os.environ.get("ROXY_MPV", "mpv")
+# HG680P-tested rendering path. These remain overridable for later DRM PRIME builds.
+MPV_HWDEC = os.environ.get("ROXY_MPV_HWDEC", "v4l2m2m-copy")
+MPV_VO = os.environ.get("ROXY_MPV_VO", "gpu")
+MPV_GPU_CONTEXT = os.environ.get("ROXY_MPV_GPU_CONTEXT", "x11egl")
+MPV_GPU_API = os.environ.get("ROXY_MPV_GPU_API", "opengl")
 QUALITY_FORMATS = {
     "Auto": "bv*+ba/b",
     "360p": "bv*[height<=360]+ba/b[height<=360]",
     "480p": "bv*[height<=480]+ba/b[height<=480]",
     "720p": "bv*[height<=720]+ba/b[height<=720]",
+    "1080p": "bv*[height<=1080]+ba/b[height<=1080]",
 }
+
+
+def mpv_process_environment():
+    """Make MPV's ytdl_hook resolve the same app-local yt-dlp as RoxyTube."""
+    environment = QProcessEnvironment.systemEnvironment()
+    executable = shutil.which(YTDLP) or YTDLP
+    executable_path = Path(executable)
+    if executable_path.is_absolute():
+        bin_dir = str(executable_path.resolve().parent)
+        current_path = environment.value("PATH")
+        if bin_dir not in current_path.split(os.pathsep):
+            environment.insert("PATH", bin_dir + os.pathsep + current_path)
+    return environment
 
 
 def safe_area_margins():
@@ -1349,6 +1382,8 @@ class MainWindow(QMainWindow):
             return False
 
     def quality_fallbacks(self, quality):
+        if quality == "1080p":
+            return ["720p", "480p", "Auto"]
         if quality == "720p":
             return ["480p", "Auto"]
         if quality == "480p":
@@ -1436,7 +1471,11 @@ class MainWindow(QMainWindow):
         self.player_process = process
         # Attach MPV to the native Qt child window; do not create a separate
         # top-level MPV window. HG680P's verified audible ALSA route is dmix.
-        args = ["--no-osc", "--vo=x11", f"--wid={int(self.video_surface.winId())}",
+        args = ["--no-osc", f"--vo={MPV_VO}",
+                f"--gpu-context={MPV_GPU_CONTEXT}", f"--gpu-api={MPV_GPU_API}",
+                f"--hwdec={MPV_HWDEC}", f"--wid={int(self.video_surface.winId())}",
+                # Keep MPV embedded in the Qt child window. The existing Qt Safe Area
+                # geometry remains the owner of the visible playback rectangle.
                 # Never let MPV consume the TV remote; Roxy handles D-pad keys
                 # and sends explicit playback commands over MPV IPC.
                 "--input-vo-keyboard=no", "--input-default-bindings=no",
@@ -1456,6 +1495,7 @@ class MainWindow(QMainWindow):
         args.append(self.playback_queue[self.current_index]["url"])
         process.setProgram(MPV)
         process.setArguments(args)
+        process.setProcessEnvironment(mpv_process_environment())
         process.started.connect(lambda p=process: self.player_started(p))
         process.finished.connect(lambda code, _status, p=process: self.player_finished(p, code))
         process.errorOccurred.connect(lambda _err, p=process: self.player_error(p))
