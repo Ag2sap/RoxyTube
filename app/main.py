@@ -20,11 +20,17 @@ SETTINGS_FILE = CONFIG_DIR / "roxy-youtube-tv" / "settings.json"
 CACHE_DIR = Path.home() / ".cache" / "roxy-youtube-tv" / "thumbnails"
 YTDLP = os.environ.get("ROXY_YT_DLP", "yt-dlp")
 MPV = os.environ.get("ROXY_MPV", "mpv")
+# HG680P: use the proven Amlogic meson-vdec H.264 path and X11 EGL presentation.
+MPV_HWDEC = os.environ.get("ROXY_MPV_HWDEC", "v4l2m2m-copy")
+MPV_VO = os.environ.get("ROXY_MPV_VO", "gpu")
+MPV_GPU_CONTEXT = os.environ.get("ROXY_MPV_GPU_CONTEXT", "x11egl")
+MPV_GPU_API = os.environ.get("ROXY_MPV_GPU_API", "opengl")
+# Restrict YouTube video formats to AVC/H.264; avoid VP9/AV1 on this hardware path.
 QUALITY_FORMATS = {
-    "Auto": "bv*+ba/b",
-    "360p": "bv*[height<=360]+ba/b[height<=360]",
-    "480p": "bv*[height<=480]+ba/b[height<=480]",
-    "720p": "bv*[height<=720]+ba/b[height<=720]",
+    "Auto": "bv*[vcodec^=avc1][height<=1080]+ba/bv*[vcodec^=avc1][height<=1080]",
+    "360p": "bv*[vcodec^=avc1][height<=360]+ba/bv*[vcodec^=avc1][height<=360]",
+    "480p": "bv*[vcodec^=avc1][height<=480]+ba/bv*[vcodec^=avc1][height<=480]",
+    "720p": "bv*[vcodec^=avc1][height<=720]+ba/bv*[vcodec^=avc1][height<=720]",
 }
 
 
@@ -1835,7 +1841,10 @@ class MainWindow(QMainWindow):
         self.player_process = process
         # Attach MPV to the native Qt child window; do not create a separate
         # top-level MPV window. HG680P's verified audible ALSA route is dmix.
-        args = ["--no-osc", "--vo=x11", f"--wid={int(self.video_surface.winId())}",
+        args = ["--no-osc", f"--vo={MPV_VO}",
+                f"--gpu-context={MPV_GPU_CONTEXT}", f"--gpu-api={MPV_GPU_API}",
+                f"--hwdec={MPV_HWDEC}", "--hwdec-codecs=h264",
+                f"--wid={int(self.video_surface.winId())}",
                 # Never let MPV consume the TV remote; Roxy handles D-pad keys
                 # and sends explicit playback commands over MPV IPC.
                 "--input-vo-keyboard=no", "--input-default-bindings=no",
