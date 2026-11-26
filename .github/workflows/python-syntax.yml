@@ -5,6 +5,7 @@ on:
     branches:
       - feature/tv-ui-single-layer
       - feature/plasmatube-style-ui
+      - feature/channel-playback-ytdlp-opt
   pull_request:
     branches:
       - main
@@ -19,3 +20,10 @@ jobs:
           python-version: "3.12"
       - name: Compile application source
         run: python -m py_compile app/main.py
+      - name: Check shell script syntax
+        run: |
+          sh -n scripts/run.sh
+          sh -n scripts/install-yt-dlp.sh
+          sh -n scripts/install-drmprime-runtime.sh
+          bash -n scripts/build-drmprime-runtime.sh
+          bash -n scripts/check-drmprime-patch.sh
