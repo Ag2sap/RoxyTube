@@ -41,9 +41,12 @@ Run as the normal desktop user (HG680P: roxy), not root. Device deployment uses 
 
 ## Run
 
-Install the latest official yt-dlp ARM64 binary (as user `roxy`, no sudo):
+Install the latest official yt-dlp ARM64 binary and the optional app-local Deno JavaScript runtime (as user `roxy`, no sudo):
 
     sh scripts/install-yt-dlp.sh
+    sh scripts/install-deno.sh
+
+Deno enables yt-dlp's YouTube JavaScript challenge solver (EJS). The installer verifies the official ARM64 release checksum and keeps Deno inside RoxyTube's app data; it does not edit the system PATH or shell profiles.
 
 Then launch:
 
