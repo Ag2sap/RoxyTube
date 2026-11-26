@@ -20,6 +20,8 @@ jobs:
           python-version: "3.12"
       - name: Compile application source
         run: python -m py_compile app/main.py
+      - name: Check Channel and playback contracts
+        run: python -m unittest discover -s tests -v
       - name: Check shell script syntax
         run: |
           sh -n scripts/run.sh
