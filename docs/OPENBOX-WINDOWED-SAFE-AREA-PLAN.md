@@ -111,7 +111,7 @@ The RCA values are not confirmed final calibration. Validate all four edges on t
 - [x] Implement resolution-specific pixel profile loading with separate 720×576 and 1920×1080 defaults.
 - [x] Implement outer frameless-window safe geometry and first-show placement.
 - [x] Convert the playback expand control to windowed immersive UI (no OS fullscreen request).
-- [ ] Add remote-friendly pixel adjustment controls; static regression tests updated, execution still pending.
+- [x] Add remote-friendly pixel adjustment controls and atomic profile persistence; static regression tests updated, execution still pending.
 - [ ] Validate on HG680P after explicit deployment approval.
 
 
@@ -125,5 +125,5 @@ The first implementation commit applies the core windowed approach:
 - The playback expand control now hides/shows in-window UI only. It does not call `showFullScreen()`.
 - Minimize/restore and single-instance activation use windowed geometry.
 - README and a JSON example were updated.
-- Static playback contract tests were updated but have not yet been executed in this environment. No claim of runtime or device success is made.
-- The pixel adjustment controls are still pending; profiles can currently be edited in the JSON file.
+- Static playback contract tests were updated to cover pixel-profile persistence, outer geometry, and the absence of OS fullscreen calls. They have not yet been executed in this environment. No claim of runtime or device success is made.
+- The Settings page now exposes four pixel spinboxes and a save/apply action for the detected display resolution. Profiles can also be edited directly in JSON.
