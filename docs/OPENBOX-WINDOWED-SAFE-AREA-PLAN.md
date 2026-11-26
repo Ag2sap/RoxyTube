@@ -125,5 +125,5 @@ The first implementation commit applies the core windowed approach:
 - The playback expand control now hides/shows in-window UI only. It does not call `showFullScreen()`.
 - Minimize/restore and single-instance activation use windowed geometry.
 - README and a JSON example were updated.
-- Static playback contract tests were updated to cover pixel-profile persistence, outer geometry, and the absence of OS fullscreen calls. They have not yet been executed in this environment. No claim of runtime or device success is made.
+- GitHub Actions passed for Python compilation, playback/Channel contract tests, and shell-script syntax checks (run 45862543335). These are static/CI checks only; no runtime or device success is inferred.
 - The Settings page now exposes four pixel spinboxes and a save/apply action for the detected display resolution. Profiles can also be edited directly in JSON.
