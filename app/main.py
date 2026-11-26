@@ -4,7 +4,7 @@ from __future__ import annotations
 import json, os, shutil, sys
 from pathlib import Path
 from urllib.parse import quote_plus
-from PySide6.QtCore import Qt, QEvent, QProcess, QUrl, QTimer, QPropertyAnimation, QEasingCurve, QSize, QRect
+from PySide6.QtCore import Qt, QEvent, QProcess, QProcessEnvironment, QUrl, QTimer, QPropertyAnimation, QEasingCurve, QSize, QRect
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QIcon, QPainterPath, QFontMetrics
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkDiskCache, QLocalSocket, QLocalServer
 from PySide6.QtWidgets import (
@@ -18,13 +18,68 @@ CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 SAFE_AREA_FILE = CONFIG_DIR / "roxy-display" / "safe-area.json"
 SETTINGS_FILE = CONFIG_DIR / "roxy-youtube-tv" / "settings.json"
 CACHE_DIR = Path.home() / ".cache" / "roxy-youtube-tv" / "thumbnails"
-YTDLP = os.environ.get("ROXY_YT_DLP", "yt-dlp")
+APP_DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "roxy-youtube-tv"
+APP_YTDLP = APP_DATA_DIR / "bin" / "yt-dlp"
+APP_YTDLP_CONFIG = CONFIG_DIR / "roxy-youtube-tv" / "yt-dlp.conf"
+
+
+def resolve_ytdlp():
+    """Prefer an explicit override, then RoxyTube's app-local binary, then PATH."""
+    override = os.environ.get("ROXY_YT_DLP")
+    if override:
+        return override
+    if APP_YTDLP.is_file() and os.access(APP_YTDLP, os.X_OK):
+        return str(APP_YTDLP)
+    return shutil.which("yt-dlp") or "yt-dlp"
+
+
+def ytdlp_arguments(arguments):
+    """Isolate RoxyTube from global yt-dlp config while allowing an app-owned config."""
+    args = ["--ignore-config"]
+    if APP_YTDLP_CONFIG.is_file():
+        args.extend(["--config-locations", str(APP_YTDLP_CONFIG)])
+    return args + list(arguments)
+
+
+def mpv_process_environment():
+    """Make MPV's ytdl_hook resolve the same yt-dlp binary as RoxyTube."""
+    environment = QProcessEnvironment.systemEnvironment()
+    executable = shutil.which(YTDLP) or YTDLP
+    executable_path = Path(executable)
+    if executable_path.is_absolute():
+        bin_dir = str(executable_path.resolve().parent)
+        current_path = environment.value("PATH")
+        if bin_dir not in current_path.split(os.pathsep):
+            environment.insert("PATH", bin_dir + os.pathsep + current_path)
+    return environment
+
+
+def mpv_ytdl_raw_options(quality):
+    """Pass the isolated yt-dlp config policy through MPV's ytdl_hook."""
+    resolution = quality.replace("p", "") if quality != "Auto" else "1080"
+    options = ["ignore-config=", "sub-langs=none", f"format-sort=res:{resolution}"]
+    if APP_YTDLP_CONFIG.is_file():
+        options.append(f"config-locations={APP_YTDLP_CONFIG}")
+    return ",".join(options)
+
+
+YTDLP = resolve_ytdlp()
 MPV = os.environ.get("ROXY_MPV", "mpv")
+MPV_HWDEC = os.environ.get("ROXY_MPV_HWDEC", "v4l2m2m-copy")
+MPV_HWDEC_FALLBACKS = tuple(
+    item.strip() for item in os.environ.get("ROXY_MPV_HWDEC_FALLBACKS", "no").split(",")
+    if item.strip()
+)
+MPV_VO = os.environ.get("ROXY_MPV_VO", "gpu")
+MPV_GPU_CONTEXT = os.environ.get("ROXY_MPV_GPU_CONTEXT", "x11egl")
+MPV_GPU_API = os.environ.get("ROXY_MPV_GPU_API", "opengl")
+MPV_GPU_HWDEC_INTEROP = os.environ.get("ROXY_MPV_GPU_HWDEC_INTEROP", "")
 QUALITY_FORMATS = {
     "Auto": "bv*+ba/b",
     "360p": "bv*[height<=360]+ba/b[height<=360]",
     "480p": "bv*[height<=480]+ba/b[height<=480]",
     "720p": "bv*[height<=720]+ba/b[height<=720]",
+    "1080p": "bv*[height<=1080]+ba/b[height<=1080]",
 }
 
 
@@ -1385,7 +1440,7 @@ class MainWindow(QMainWindow):
         process = QProcess(self)
         self.search_process = process
         process.setProgram(YTDLP)
-        process.setArguments(["--no-warnings", "--flat-playlist", "--dump-single-json", target])
+        process.setArguments(ytdlp_arguments(["--no-warnings", "--flat-playlist", "--dump-single-json", target]))
         process.finished.connect(lambda code, status, p=process: self.search_finished(p, code, status))
         process.errorOccurred.connect(lambda _err, p=process: self.search_error(p))
         process.start()
@@ -1425,7 +1480,7 @@ class MainWindow(QMainWindow):
         process = QProcess(self)
         self.search_process = process
         process.setProgram(YTDLP)
-        process.setArguments(arguments)
+        process.setArguments(ytdlp_arguments(arguments))
         process.finished.connect(lambda code, status, p=process: self.search_finished(p, code, status))
         process.errorOccurred.connect(lambda _err, p=process: self.search_error(p))
         process.start()
@@ -1643,10 +1698,10 @@ class MainWindow(QMainWindow):
             process = QProcess(self)
             self.channel_avatar_lookup_process = process
             process.setProgram(YTDLP)
-            process.setArguments([
+            process.setArguments(ytdlp_arguments([
                 "--no-warnings", "--socket-timeout", "10", "--skip-download",
                 "--flat-playlist", "--playlist-items", "1", "--dump-single-json", url,
-            ])
+            ]))
             process.finished.connect(
                 lambda code, _status, p=process, c=card: self.channel_avatar_lookup_finished(p, c, code)
             )
@@ -1732,6 +1787,8 @@ class MainWindow(QMainWindow):
             return False
 
     def quality_fallbacks(self, quality):
+        if quality == "1080p":
+            return ["720p", "480p", "Auto"]
         if quality == "720p":
             return ["480p", "Auto"]
         if quality == "480p":
@@ -1765,6 +1822,8 @@ class MainWindow(QMainWindow):
         self.playback_paused = False
         self.update_play_pause_icons()
         self.fallback_qualities = self.quality_fallbacks(self.quality.currentText())
+        self.current_hwdec = MPV_HWDEC
+        self.decoder_fallbacks = list(MPV_HWDEC_FALLBACKS)
         self.metadata_requested_index = None
         video = self.playback_queue[index]
         self.player_title.setText(video["title"])
@@ -1834,19 +1893,22 @@ class MainWindow(QMainWindow):
         self.player_process = process
         # Attach MPV to the native Qt child window; do not create a separate
         # top-level MPV window. HG680P's verified audible ALSA route is dmix.
-        args = ["--no-osc", "--vo=x11", f"--wid={int(self.video_surface.winId())}",
-                # Never let MPV consume the TV remote; Roxy handles D-pad keys
-                # and sends explicit playback commands over MPV IPC.
+        args = ["--no-osc", f"--vo={MPV_VO}",
+                f"--gpu-context={MPV_GPU_CONTEXT}", f"--gpu-api={MPV_GPU_API}",
+                f"--hwdec={self.current_hwdec}", f"--wid={int(self.video_surface.winId())}",
+                # Keep MPV embedded in the Qt child window. Qt remains responsible
+                # for Safe Area geometry; MPV never takes over the display.
+                # RoxyTube owns D-pad input and sends playback commands over IPC.
                 "--input-vo-keyboard=no", "--input-default-bindings=no",
                 f"--volume={self.volume_slider.value()}",
                 "--ao=alsa",
                 "--audio-device=alsa/dmix:CARD=S905XP212,DEV=0",
                 f"--input-ipc-server={self.ipc_path}",
                 f"--ytdl-format={QUALITY_FORMATS[self.quality.currentText()]}",
-                # Keep subtitle enumeration out of the startup path while ranking formats
-                # toward the requested resolution ceiling.
-                f"--ytdl-raw-options=sub-langs=none,format-sort=res:{self.quality.currentText().replace('p', '') if self.quality.currentText() != 'Auto' else '1080'}",
+                f"--ytdl-raw-options={mpv_ytdl_raw_options(self.quality.currentText())}",
                 "--keep-open=no"]
+        if MPV_GPU_HWDEC_INTEROP and self.current_hwdec == "v4l2m2m":
+            args.append(f"--gpu-hwdec-interop={MPV_GPU_HWDEC_INTEROP}")
         if self.current_time_pos > 0.5:
             args.append(f"--start={self.current_time_pos:.2f}")
         if self.playback_paused:
@@ -1854,6 +1916,7 @@ class MainWindow(QMainWindow):
         args.append(self.playback_queue[self.current_index]["url"])
         process.setProgram(MPV)
         process.setArguments(args)
+        process.setProcessEnvironment(mpv_process_environment())
         process.started.connect(lambda p=process: self.player_started(p))
         process.finished.connect(lambda code, _status, p=process: self.player_finished(p, code))
         process.errorOccurred.connect(lambda _err, p=process: self.player_error(p))
@@ -2009,16 +2072,22 @@ class MainWindow(QMainWindow):
         )
 
     def retry_lower_quality(self, process, reason):
-        if (process is not self.player_process or self.playback_started or
-                not self.fallback_qualities):
+        if process is not self.player_process or self.playback_started:
             return False
-        next_quality = self.fallback_qualities.pop(0)
         self.set_mini_controls_enabled(False)
         self.player_process = None
-        self.quality.blockSignals(True)
-        self.quality.setCurrentText(next_quality)
-        self.quality.blockSignals(False)
-        self.player_status.setText(f"{reason} Mencoba {next_quality}…")
+        if self.decoder_fallbacks:
+            next_decoder = self.decoder_fallbacks.pop(0)
+            self.current_hwdec = next_decoder
+            self.player_status.setText(f"{reason} Mencoba decoder {next_decoder}…")
+        elif self.fallback_qualities:
+            next_quality = self.fallback_qualities.pop(0)
+            self.quality.blockSignals(True)
+            self.quality.setCurrentText(next_quality)
+            self.quality.blockSignals(False)
+            self.player_status.setText(f"{reason} Mencoba {next_quality}…")
+        else:
+            return False
         try:
             process.deleteLater()
         except RuntimeError:
@@ -2086,8 +2155,8 @@ class MainWindow(QMainWindow):
         process = QProcess(self)
         self.metadata_process = process
         process.setProgram(YTDLP)
-        process.setArguments(["--no-warnings", "--skip-download", "--no-playlist",
-                              "--dump-single-json", self.playback_queue[index]["url"]])
+        process.setArguments(ytdlp_arguments(["--no-warnings", "--skip-download", "--no-playlist",
+                              "--dump-single-json", self.playback_queue[index]["url"]]))
         process.finished.connect(lambda code, _status, p=process, i=index: self.metadata_finished(p, i, code))
         process.start()
 
