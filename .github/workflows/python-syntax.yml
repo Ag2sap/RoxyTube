@@ -28,3 +28,5 @@ jobs:
         run: bash scripts/check-drmprime-patch.sh
       - name: Check DRM PRIME build script shell syntax
         run: bash -n scripts/build-drmprime-runtime.sh
+      - name: Check DRM PRIME installer shell syntax
+        run: sh -n scripts/install-drmprime-runtime.sh
