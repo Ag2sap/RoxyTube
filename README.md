@@ -59,6 +59,7 @@ Optional runtime overrides:
 - `ROXY_MPV_VO`: video output (default `gpu`)
 - `ROXY_MPV_GPU_CONTEXT`: GPU context (default `x11egl`)
 - `ROXY_MPV_GPU_API`: GPU API (default `opengl`)
+- `ROXY_MPV_GPU_HWDEC_INTEROP`: optional GPU hwdec interop (leave unset until DRM PRIME build is verified)
 
 ## Safe Area
 
