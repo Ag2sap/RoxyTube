@@ -39,12 +39,15 @@ MPV_VO = os.environ.get("ROXY_MPV_VO", "gpu")
 MPV_GPU_CONTEXT = os.environ.get("ROXY_MPV_GPU_CONTEXT", "x11egl")
 MPV_GPU_API = os.environ.get("ROXY_MPV_GPU_API", "opengl")
 MPV_GPU_HWDEC_INTEROP = os.environ.get("ROXY_MPV_GPU_HWDEC_INTEROP", "")
+# HG680P's meson-vdec path is validated with H.264/AVC via v4l2m2m-copy.
+# Prefer YouTube AVC streams at every quality level; do not silently select VP9/AV1,
+# which this device's tested MPV hardware path does not use.
 QUALITY_FORMATS = {
-    "Auto": "bv*+ba/b",
-    "360p": "bv*[height<=360]+ba/b[height<=360]",
-    "480p": "bv*[height<=480]+ba/b[height<=480]",
-    "720p": "bv*[height<=720]+ba/b[height<=720]",
-    "1080p": "bv*[height<=1080]+ba/b[height<=1080]",
+    "Auto": "bv*[vcodec^=avc1][height<=1080]+ba/bv*[vcodec^=avc1][height<=1080]",
+    "360p": "bv*[vcodec^=avc1][height<=360]+ba/bv*[vcodec^=avc1][height<=360]",
+    "480p": "bv*[vcodec^=avc1][height<=480]+ba/bv*[vcodec^=avc1][height<=480]",
+    "720p": "bv*[vcodec^=avc1][height<=720]+ba/bv*[vcodec^=avc1][height<=720]",
+    "1080p": "bv*[vcodec^=avc1][height<=1080]+ba/bv*[vcodec^=avc1][height<=1080]",
 }
 
 
@@ -1474,7 +1477,7 @@ class MainWindow(QMainWindow):
         # top-level MPV window. HG680P's verified audible ALSA route is dmix.
         args = ["--no-osc", f"--vo={MPV_VO}",
                 f"--gpu-context={MPV_GPU_CONTEXT}", f"--gpu-api={MPV_GPU_API}",
-                f"--hwdec={MPV_HWDEC}", f"--wid={int(self.video_surface.winId())}",
+                f"--hwdec={MPV_HWDEC}", "--hwdec-codecs=h264", f"--wid={int(self.video_surface.winId())}",
                 # Keep MPV embedded in the Qt child window. The existing Qt Safe Area
                 # geometry remains the owner of the visible playback rectangle.
                 # Never let MPV consume the TV remote; Roxy handles D-pad keys
