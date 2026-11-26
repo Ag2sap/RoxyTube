@@ -3,7 +3,7 @@
 - **Branch:** `feat/openbox-windowed-safe-area`
 - **Base:** `main` at `6d7fef034f45fd15744d2d32ade2c4597f7d7744`
 - **Target:** HG680P / Armbian / X11 / Openbox / LauncherTV
-- **Status:** Implementation plan; no device deployment authorized
+- **Status:** Initial implementation committed; UI controls, automated execution, and device validation remain pending
 - **Last updated:** 2026-11-26
 
 ## 1. Goal
@@ -108,8 +108,22 @@ The RCA values are not confirmed final calibration. Validate all four edges on t
 - [x] Confirmed frameless window hint and percentage-only inner-layout margins.
 - [x] Located fullscreen transitions in playback, restore, and single-instance IPC paths.
 - [x] Confirmed Safe Area Manager currently stores percentage profiles and does not yet provide a fullscreen-safe renderer.
-- [ ] Implement pixel profile/configuration.
-- [ ] Implement outer window safe geometry.
-- [ ] Convert playback fullscreen to windowed immersive UI.
-- [ ] Add settings UI and regression tests.
+- [x] Implement resolution-specific pixel profile loading with separate 720×576 and 1920×1080 defaults.
+- [x] Implement outer frameless-window safe geometry and first-show placement.
+- [x] Convert the playback expand control to windowed immersive UI (no OS fullscreen request).
+- [ ] Add remote-friendly pixel adjustment controls; static regression tests updated, execution still pending.
 - [ ] Validate on HG680P after explicit deployment approval.
+
+
+### Initial implementation notes (2026-11-26)
+
+The first implementation commit applies the core windowed approach:
+
+- A new local file, `~/.config/roxy-youtube-tv/window-safe-area.json`, stores versioned pixel profiles keyed by display resolution.
+- Built-in 720×576 margins are 45/10/45/10 px as a candidate; 1920×1080 defaults to zero margins.
+- The outer frameless window is placed and sized within the safe rectangle, centered if the safe rectangle is larger than the app's existing maximum window size.
+- The playback expand control now hides/shows in-window UI only. It does not call `showFullScreen()`.
+- Minimize/restore and single-instance activation use windowed geometry.
+- README and a JSON example were updated.
+- Static playback contract tests were updated but have not yet been executed in this environment. No claim of runtime or device success is made.
+- The pixel adjustment controls are still pending; profiles can currently be edited in the JSON file.
