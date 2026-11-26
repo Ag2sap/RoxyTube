@@ -122,6 +122,20 @@ class PlaybackContractTests(unittest.TestCase):
         self.assertNotIn("setWindowState", enter + leave)
         self.assertNotIn("showMaximized", enter + leave)
 
+    def test_safe_area_settings_save_resolution_specific_pixel_values(self):
+        saver = function_source(APP_SOURCE, "save_safe_area_pixel_profile")
+        apply = function_source(APP_SOURCE, "save_safe_area_settings")
+        self.assertIn("WINDOW_SAFE_AREA_FILE", saver)
+        self.assertIn("profiles[resolution] = values", saver)
+        self.assertIn("temporary.replace(WINDOW_SAFE_AREA_FILE)", saver)
+        self.assertIn("safe_area_spinboxes", apply)
+        self.assertIn("apply_safe_window_geometry", apply)
+
+    def test_application_no_longer_requests_os_fullscreen_or_maximize(self):
+        self.assertNotIn("showFullScreen(", APP_SOURCE)
+        self.assertNotIn("showMaximized(", APP_SOURCE)
+        self.assertNotIn("WindowFullScreen", function_source(APP_SOURCE, "toggle_playback_fullscreen"))
+
 
 if __name__ == "__main__":
     unittest.main()
