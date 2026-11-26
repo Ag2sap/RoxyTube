@@ -69,8 +69,15 @@ git -C "$WORK/ffmpeg" diff --check
     make install
 )
 
-# Build MPV against the app-local FFmpeg libraries, with EGL/X11 GPU output.
+# MPV 0.42 requires libplacebo >= 7.387.0. The HG680P distro's
+# libplacebo 6.x is intentionally not used; build the exact minimum app-locally
+# as an MPV Meson subproject so the runtime remains isolated and reproducible.
 git clone --depth=1 --branch "$MPV_TAG" "$MPV_REPO" "$WORK/mpv"
+mkdir -p "$WORK/mpv/subprojects"
+git clone --depth=1 --branch "v7.387.0" --recursive \
+    https://code.videolan.org/videolan/libplacebo.git \
+    "$WORK/mpv/subprojects/libplacebo"
+
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 export LD_LIBRARY_PATH="$PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 meson setup "$WORK/mpv/build" "$WORK/mpv" \
