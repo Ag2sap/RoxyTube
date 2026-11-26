@@ -60,6 +60,7 @@ Branch ini menyelaraskan opsi MPV embedded dengan jalur yang sudah pernah berhas
 - `ROXY_MPV_VO` (default: `gpu`)
 - `ROXY_MPV_GPU_CONTEXT` (default: `x11egl`)
 - `ROXY_MPV_GPU_API` (default: `opengl`)
+- `ROXY_MPV_GPU_HWDEC_INTEROP` (opsional; kosong pada build saat ini)
 - `ROXY_YT_DLP` untuk memilih binary yt-dlp secara eksplisit.
 
 **Penting:** `v4l2m2m-copy` tetap jalur copy. Perubahan ini mengaktifkan GPU renderer yang telah diuji bersama V4L2, tetapi belum mengaktifkan zero-copy DRM PRIME.
@@ -91,8 +92,8 @@ Patch dari proyek S905X lama ditujukan untuk FFmpeg 4.4.x dan tidak boleh diasum
 Langkah implementasi berikutnya:
 1. Pin source FFmpeg Amlogic/V4L2 yang menyediakan ekspor DRM PRIME dan catat commit serta lisensinya.
 2. Build FFmpeg ARM64 terisolasi, lalu pastikan decoder H.264 menghasilkan `AV_PIX_FMT_DRM_PRIME` dan descriptor DMA-BUF yang valid.
-3. Build MPV terisolasi terhadap FFmpeg tersebut; verifikasi interop yang benar dengan `mpv --gpu-hwdec-interop=help` dan uji format hasil decoder.
-4. Pertahankan renderer GPU EGL/X11 bila interop tersebut dapat bekerja di child window. Jangan mengaktifkan `vo=drm` atau mengambil alih KMS secara langsung tanpa desain Safe Area baru.
+3. Build MPV terisolasi terhadap FFmpeg tersebut; verifikasi interop yang benar dengan `mpv --gpu-hwdec-interop=help` dan uji format hasil decoder. Pada kombinasi yang mendukungnya, mode V4L2 DRM PRIME di MPV menggunakan `--hwdec=v4l2m2m` (bukan `v4l2m2m-copy`) dan interop `drmprime`.
+4. Jika hasil build mengenali mode tersebut, aktifkan secara opt-in melalui `ROXY_MPV_HWDEC=v4l2m2m` dan `ROXY_MPV_GPU_HWDEC_INTEROP=drmprime`. Pertahankan renderer GPU EGL/X11 bila interop tersebut dapat bekerja di child window. Jangan mengaktifkan `vo=drm` atau mengambil alih KMS secara langsung tanpa desain Safe Area baru.
 5. Hanya setelah pengujian berhasil, tambahkan paket runtime terisolasi dan opsi DRM PRIME khusus untuk build tersebut.
 
 ### 5. Safe Area dan integrasi antarmuka
@@ -128,6 +129,7 @@ DRM PRIME baru dianggap selesai jika log membuktikan frame DRM PRIME diterima ol
 - [x] MPV ytdl hook diarahkan ke PATH yang memuat yt-dlp app-local.
 - [x] Pilihan kualitas 1080p dan fallback ditambahkan.
 - [x] MPV embedded diarahkan ke GPU EGL/X11 dengan V4L2 copy sebagai jalur transisi.
+- [x] Override interop GPU DRM PRIME disediakan, tetapi tidak aktif pada build saat ini.
 - [x] Safe Area lama dipertahankan.
 - [ ] Uji syntax dan installer di CI.
 - [ ] Jalankan installer dan playback di HG680P.
