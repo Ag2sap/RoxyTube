@@ -99,11 +99,42 @@ class PlaybackContractTests(unittest.TestCase):
         self.assertIn('ROXY_MPV_GPU_CONTEXT:-x11egl', RUN_SOURCE)
         self.assertIn('ROXY_MPV_GPU_API:-opengl', RUN_SOURCE)
 
-    def test_safe_area_config_remains_owned_by_qt_window(self):
-        margins = function_source(APP_SOURCE, "safe_area_margins")
-        self.assertIn("SAFE_AREA_FILE", margins)
-        self.assertIn("margin_left", margins)
-        self.assertIn("margin_right", margins)
+    def test_safe_area_uses_resolution_specific_pixel_profiles(self):
+        margins = function_source(APP_SOURCE, "safe_area_pixel_margins")
+        self.assertIn("WINDOW_SAFE_AREA_FILE", margins)
+        self.assertIn('"720x576"', margins)
+        self.assertIn('"left": 45', margins)
+        self.assertIn('"right": 45', margins)
+        self.assertIn('"top": 10', margins)
+        self.assertIn('"bottom": 10', margins)
+        self.assertNotIn("safe_area_margins()", APP_SOURCE)
+
+    def test_safe_area_changes_outer_window_geometry_not_inner_padding(self):
+        geometry = function_source(APP_SOURCE, "apply_safe_window_geometry")
+        apply = function_source(APP_SOURCE, "apply_safe_area")
+        self.assertIn("self.setGeometry(self._safe_window_geometry)", geometry)
+        self.assertIn("self.root_layout.setContentsMargins(0, 0, 0, 0)", apply)
+
+    def test_playback_immersive_mode_does_not_request_os_fullscreen(self):
+        enter = function_source(APP_SOURCE, "toggle_playback_fullscreen")
+        leave = function_source(APP_SOURCE, "exit_playback_fullscreen")
+        self.assertNotIn("showFullScreen", enter + leave)
+        self.assertNotIn("setWindowState", enter + leave)
+        self.assertNotIn("showMaximized", enter + leave)
+
+    def test_safe_area_settings_save_resolution_specific_pixel_values(self):
+        saver = function_source(APP_SOURCE, "save_safe_area_pixel_profile")
+        apply = function_source(APP_SOURCE, "save_safe_area_settings")
+        self.assertIn("WINDOW_SAFE_AREA_FILE", saver)
+        self.assertIn("profiles[resolution] = values", saver)
+        self.assertIn("temporary.replace(WINDOW_SAFE_AREA_FILE)", saver)
+        self.assertIn("safe_area_spinboxes", apply)
+        self.assertIn("apply_safe_window_geometry", apply)
+
+    def test_application_no_longer_requests_os_fullscreen_or_maximize(self):
+        self.assertNotIn("showFullScreen(", APP_SOURCE)
+        self.assertNotIn("showMaximized(", APP_SOURCE)
+        self.assertNotIn("WindowFullScreen", function_source(APP_SOURCE, "toggle_playback_fullscreen"))
 
 
 if __name__ == "__main__":

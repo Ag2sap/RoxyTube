@@ -24,7 +24,7 @@ A lightweight YouTube TV-style frontend for HG680P / Armbian Noble (ARM64).
 - RoxyTube isolates yt-dlp from the user's global config. An optional app-specific config can be placed at `~/.config/roxy-youtube-tv/yt-dlp.conf`; search, Channel lookup, metadata and MPV's ytdl hook share the same isolation policy.
 - MPV remains embedded in the Qt video surface. The normal path uses GPU/X11 EGL with `v4l2m2m-copy`; a separate app-local DRM PRIME MPV runtime is opt-in and retries `v4l2m2m-copy`, then software decoding if the primary decoder fails.
 - Automatic next-video playback follows the current result/queue order.
-- Fullscreen playback hides surrounding UI; the timeline and controls reappear on mouse movement near the bottom or D-pad Down, then auto-hide after one second of inactivity.
+- Immersive playback hides surrounding UI inside the existing frameless window; the timeline and controls reappear on mouse movement near the bottom or D-pad Down, then auto-hide after one second of inactivity. It does not request OS/EWMH fullscreen.
 - Back from playback returns to the Home/results page while audio playback continues; no floating video window is shown. A bordered mini-player in the Home header shows the scrolling title, progress, and remote-friendly controls; selecting its title returns to the active video without restarting it.
 - The active playback queue is kept separate from newly loaded search results, so browsing or searching does not unexpectedly replace the queue currently playing. Selecting a new result deliberately replaces the active playback session.
 - Home-only window controls stay pinned to the top-right corner; minimizing keeps playback running, while closing stops playback after confirmation. The app window remains frameless when restored or returned from playback fullscreen.
@@ -60,17 +60,37 @@ The isolated DRM PRIME runtime is built and installed separately. It is never se
 
 ## Safe Area
 
-The app reads ~/.config/roxy-display/safe-area.json. If missing, defaults are used. Margins are percentages of the app window and affect the interface only; they do not change Xorg output geometry or MPV video scaling.
+RoxyTube uses a frameless, windowed outer rectangle for overscan compensation on X11/Openbox. Pixel margins are selected by display resolution and applied to the outer window geometry; they are not percentage padding inside the Qt layout.
 
-Example:
+Configuration file:
 
-    {
-      "aspect_ratio": "4:3",
-      "margin_left": 5,
-      "margin_right": 5,
-      "margin_top": 5,
-      "margin_bottom": 5
+`~/.config/roxy-youtube-tv/window-safe-area.json`
+
+Schema example:
+
+```json
+{
+  "version": 1,
+  "profiles": {
+    "720x576": {
+      "left": 45,
+      "top": 10,
+      "right": 45,
+      "bottom": 10
+    },
+    "1920x1080": {
+      "left": 0,
+      "top": 0,
+      "right": 0,
+      "bottom": 0
     }
+  }
+}
+```
+
+The 720×576 values are an initial calibration candidate only and must be checked against the actual TV edges. HDMI has an independent profile. Missing or invalid profiles fall back to zero margins, except the built-in 720×576 candidate. The previous `~/.config/roxy-display/safe-area.json` percentage file is not modified or reinterpreted.
+
+The playback expand control switches the playback UI into an immersive mode while keeping the main window windowed. Safe Area Manager integration is not yet implemented; the app currently reads its own local pixel-profile file.
 
 ## Limitations
 

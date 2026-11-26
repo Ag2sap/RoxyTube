@@ -6,6 +6,7 @@ on:
       - feature/tv-ui-single-layer
       - feature/plasmatube-style-ui
       - feature/channel-playback-ytdlp-opt
+      - feat/openbox-windowed-safe-area
   pull_request:
     branches:
       - main
