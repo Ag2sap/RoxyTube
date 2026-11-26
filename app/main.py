@@ -15,7 +15,8 @@ from PySide6.QtWidgets import (
 
 APP_NAME = "YouTube Roxy"
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-SAFE_AREA_FILE = CONFIG_DIR / "roxy-display" / "safe-area.json"
+SAFE_AREA_FILE = CONFIG_DIR / "roxy-display" / "safe-area.json"  # legacy percentage-based UI inset
+WINDOW_SAFE_AREA_FILE = CONFIG_DIR / "roxy-youtube-tv" / "window-safe-area.json"
 SETTINGS_FILE = CONFIG_DIR / "roxy-youtube-tv" / "settings.json"
 CACHE_DIR = Path.home() / ".cache" / "roxy-youtube-tv" / "thumbnails"
 APP_DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "roxy-youtube-tv"
@@ -97,15 +98,43 @@ QUALITY_FORMATS = {
 }
 
 
-def safe_area_margins():
-    values = {"margin_left": 4, "margin_right": 4, "margin_top": 4, "margin_bottom": 4}
+def safe_area_pixel_margins(screen_width, screen_height):
+    """Load pixel margins for the current display resolution.
+
+    RCA's initial values are a calibration candidate, not a universal default.
+    Existing percentage-based roxy-display settings are deliberately not
+    reinterpreted as pixels.
+    """
+    resolution = f"{int(screen_width)}x{int(screen_height)}"
+    defaults = {"left": 0, "top": 0, "right": 0, "bottom": 0}
+    if resolution == "720x576":
+        defaults = {"left": 45, "top": 10, "right": 45, "bottom": 10}
     try:
-        data = json.loads(SAFE_AREA_FILE.read_text(encoding="utf-8"))
-        for key in values:
-            values[key] = max(0.0, min(15.0, float(data.get(key, values[key]))))
+        data = json.loads(WINDOW_SAFE_AREA_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or data.get("version") != 1:
+            return defaults
+        profiles = data.get("profiles")
+        if not isinstance(profiles, dict):
+            return defaults
+        profile = profiles.get(resolution)
+        if not isinstance(profile, dict):
+            return defaults
+        values = {}
+        for key, fallback in defaults.items():
+            value = profile.get(key, fallback)
+            if isinstance(value, bool):
+                return defaults
+            value = int(value)
+            if value < 0:
+                return defaults
+            values[key] = value
+        if values["left"] + values["right"] >= int(screen_width):
+            return defaults
+        if values["top"] + values["bottom"] >= int(screen_height):
+            return defaults
+        return values
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        pass
-    return values
+        return defaults
 
 
 def load_app_settings():
@@ -755,7 +784,8 @@ class MainWindow(QMainWindow):
         self.cache.setCacheDirectory(str(CACHE_DIR))
         self.cache.setMaximumCacheSize(32 * 1024 * 1024)
         self.network.setCache(self.cache)
-        self.safe_margins = safe_area_margins()
+        self._safe_geometry_initialized = False
+        self._safe_window_geometry = None
         self.ipc_path = f"/tmp/roxy-youtube-tv-{os.getpid()}.sock"
         self.mpv_socket = None
         self.mpv_event_socket = None
@@ -1302,10 +1332,39 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(700, lambda: self.load_feed("home"))
 
     def apply_safe_area(self):
-        m, w, h = self.safe_margins, max(1, self.width()), max(1, self.height())
-        self.root_layout.setContentsMargins(round(w*m["margin_left"]/100),
-            round(h*m["margin_top"]/100), round(w*m["margin_right"]/100),
-            round(h*m["margin_bottom"]/100))
+        # Overscan compensation belongs to the outer frameless window geometry,
+        # not to arbitrary padding inside the application's root layout.
+        self.root_layout.setContentsMargins(0, 0, 0, 0)
+
+    def apply_safe_window_geometry(self):
+        screen = self.screen()
+        if screen is None:
+            return False
+        bounds = screen.geometry()
+        margins = safe_area_pixel_margins(bounds.width(), bounds.height())
+        safe_left = bounds.x() + margins["left"]
+        safe_top = bounds.y() + margins["top"]
+        safe_width = bounds.width() - margins["left"] - margins["right"]
+        safe_height = bounds.height() - margins["top"] - margins["bottom"]
+        target_width = min(safe_width, self.maximumWidth())
+        target_height = min(safe_height, self.maximumHeight())
+        if target_width < self.minimumWidth() or target_height < self.minimumHeight():
+            self.status.setText(
+                "Safe Area terlalu kecil untuk ukuran minimum RoxyTube; geometri tidak diubah."
+            )
+            return False
+        target_x = safe_left + (safe_width - target_width) // 2
+        target_y = safe_top + (safe_height - target_height) // 2
+        self._safe_window_geometry = QRect(target_x, target_y, target_width, target_height)
+        if not self.isMinimized():
+            self.setGeometry(self._safe_window_geometry)
+        return True
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._safe_geometry_initialized:
+            self._safe_geometry_initialized = True
+            QTimer.singleShot(0, self.apply_safe_window_geometry)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -2561,20 +2620,12 @@ class MainWindow(QMainWindow):
             self.keyboard_button.setFocus()
 
     def toggle_playback_fullscreen(self):
+        # This is an immersive playback UI mode, not an OS/EWMH fullscreen
+        # transition. Keep the frameless window inside its configured safe rect.
         if self.is_playback_fullscreen:
             self.exit_playback_fullscreen()
             return
-        if self.isFullScreen():
-            self._playback_return_state = "fullscreen"
-        elif self.isMaximized():
-            self._playback_return_state = "maximized"
-        else:
-            self._playback_return_state = "normal"
-        # Preserve the windowed geometry before Qt replaces it with fullscreen geometry.
-        # Capture the actual pre-fullscreen rectangle; normalGeometry() may be stale.
-        self._restore_geometry = self.geometry()
         self.is_playback_fullscreen = True
-        self.showFullScreen()
         self.player_header_widget.hide()
         self.player_meta.hide()
         self.channel_profile_button.hide()
@@ -2595,18 +2646,7 @@ class MainWindow(QMainWindow):
         self.fullscreen_hide_timer.stop()
         self.is_playback_fullscreen = False
         self.fullscreen_controls_visible = True
-        if self._playback_return_state == "fullscreen":
-            self.setWindowState(Qt.WindowFullScreen)
-            self.showFullScreen()
-        elif self._playback_return_state == "maximized":
-            self.setWindowState(Qt.WindowMaximized)
-            self.showMaximized()
-        else:
-            self.setWindowState(Qt.WindowNoState)
-            self.show()
-            if self._restore_geometry is not None and self._restore_geometry.isValid():
-                geometry = self._restore_geometry
-                QTimer.singleShot(0, lambda: self.setGeometry(geometry))
+        # The main window never left its windowed safe geometry.
         self.player_header_widget.show()
         self.player_meta.hide()
         self.channel_profile_button.show()
@@ -3217,35 +3257,18 @@ class MainWindow(QMainWindow):
     def minimize_window(self):
         if self.isMinimized():
             return
-        if self.is_playback_fullscreen or self.isFullScreen():
-            # The windowed rectangle was saved before entering playback fullscreen.
-            # Never replace it with fullscreen geometry here.
-            self._activation_state = "fullscreen"
-        elif self.isMaximized():
-            self._restore_geometry = self.normalGeometry()
-            self._activation_state = "maximized"
-        else:
-            # geometry() is the rectangle currently shown; normalGeometry() can be stale.
-            self._restore_geometry = self.geometry()
-            self._activation_state = "normal"
+        self._activation_state = "normal"
+        self._restore_geometry = self.geometry()
         self.showMinimized()
 
     def restore_window(self):
-        mode = self._activation_state
-        geometry = self._restore_geometry
-        if mode == "fullscreen":
-            # Home and playback can both be fullscreen; restore the window state itself.
-            self.setWindowState(Qt.WindowFullScreen)
-            self.showFullScreen()
-        elif mode == "maximized":
-            self.setWindowState(Qt.WindowMaximized)
-            self.showMaximized()
-        else:
-            self.setWindowState(Qt.WindowNoState)
-            self.show()
-            if geometry is not None and geometry.isValid():
-                # Apply the saved normal rectangle after the window manager maps the window.
-                QTimer.singleShot(0, lambda: self.setGeometry(geometry))
+        geometry = self._restore_geometry or self._safe_window_geometry
+        self.setWindowState(Qt.WindowNoState)
+        self.show()
+        if geometry is not None and geometry.isValid():
+            QTimer.singleShot(0, lambda: self.setGeometry(geometry))
+        elif self._safe_window_geometry is None:
+            QTimer.singleShot(0, self.apply_safe_window_geometry)
         self.raise_()
         self.activateWindow()
 
@@ -3324,10 +3347,9 @@ def main():
                 if window.isMinimized():
                     window.restore_window()
                 else:
-                    if window.is_playback_fullscreen:
-                        window.showFullScreen()
-                    else:
-                        window.show()
+                    window.show()
+                    if window._safe_window_geometry is not None:
+                        window.setGeometry(window._safe_window_geometry)
                     window.raise_()
                     window.activateWindow()
             client.disconnectFromServer()
