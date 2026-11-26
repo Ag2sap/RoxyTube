@@ -38,6 +38,7 @@ MPV_HWDEC = os.environ.get("ROXY_MPV_HWDEC", "v4l2m2m-copy")
 MPV_VO = os.environ.get("ROXY_MPV_VO", "gpu")
 MPV_GPU_CONTEXT = os.environ.get("ROXY_MPV_GPU_CONTEXT", "x11egl")
 MPV_GPU_API = os.environ.get("ROXY_MPV_GPU_API", "opengl")
+MPV_GPU_HWDEC_INTEROP = os.environ.get("ROXY_MPV_GPU_HWDEC_INTEROP", "")
 QUALITY_FORMATS = {
     "Auto": "bv*+ba/b",
     "360p": "bv*[height<=360]+ba/b[height<=360]",
@@ -1488,6 +1489,8 @@ class MainWindow(QMainWindow):
                 # toward the requested resolution ceiling.
                 f"--ytdl-raw-options=sub-langs=none,format-sort=res:{self.quality.currentText().replace('p', '') if self.quality.currentText() != 'Auto' else '1080'}",
                 "--keep-open=no"]
+        if MPV_GPU_HWDEC_INTEROP:
+            args.append(f"--gpu-hwdec-interop={MPV_GPU_HWDEC_INTEROP}")
         if self.current_time_pos > 0.5:
             args.append(f"--start={self.current_time_pos:.2f}")
         if self.playback_paused:
