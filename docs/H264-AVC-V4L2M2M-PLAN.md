@@ -11,6 +11,8 @@ Use YouTube AVC/H.264 streams on the HG680P so MPV can use the Amlogic `meson-vd
 ## Current code changes
 
 - Filter Auto, 360p, 480p, 720p, and 1080p format choices to AVC streams (`vcodec^=avc1`).
+- Read the active Qt playback screen refresh rate at launch; recognize common 50 Hz and 60 Hz output modes.
+- Prefer an exact matching AVC FPS first (50/60 FPS), then the best AVC FPS at or below that refresh rate, then fall back to the original AVC selector. This preference is per playback and does not force a frame rate when a matching format is unavailable.
 - Keep the existing resolution choices and resolution caps for explicit quality selections.
 - Request MPV hardware decoding for H.264 using the existing `v4l2m2m-copy` default and `--hwdec-codecs=h264`.
 - Wait for the previous MPV process to exit before starting a replacement. This prevents overlapping MPV processes from competing for the embedded video surface and IPC socket during quality changes.
@@ -21,9 +23,11 @@ Use YouTube AVC/H.264 streams on the HG680P so MPV can use the Amlogic `meson-vd
 1. Pull this branch and run Python syntax compilation.
 2. Confirm the running MPV binary accepts `--hwdec-codecs=h264`.
 3. Play a YouTube video that offers AVC at 1080p. Confirm the displayed stream resolution reaches 1920x1080 when available.
-4. Inspect MPV's video decoder log/property and confirm H.264 uses `v4l2m2m-copy` / `meson-vdec` and produces frames.
-5. Switch through Auto, 360p, 480p, 720p, and 1080p while playing. Confirm each selection restarts only one MPV process and the actual stream resolution changes within the selected cap.
-6. Confirm audio, D-pad controls, embedded window geometry, fullscreen/restore, and Safe Area behavior remain intact.
+4. Confirm the active Qt screen refresh rate is read correctly for the RCA 50 Hz output; also test a 60 Hz output when available.
+5. Inspect MPV's selected format and confirm exact 50/60 FPS is preferred when available, then a lower compatible FPS, while the original AVC selector remains the fallback when no compatible format exists.
+6. Inspect MPV's video decoder log/property and confirm H.264 uses `v4l2m2m-copy` / `meson-vdec` and produces frames.
+7. Switch through Auto, 360p, 480p, 720p, and 1080p while playing. Confirm each selection restarts only one MPV process and the actual stream resolution changes within the selected cap.
+8. Confirm audio, D-pad controls, embedded window geometry, fullscreen/restore, and Safe Area behavior remain intact.
 
 ## Known limits
 
