@@ -106,12 +106,6 @@ ROXY_MPV_GPU_HWDEC_INTEROP=drmprime
 
 Mode tersebut belum diaktifkan sebagai default dan belum diuji di HG680P. Renderer tetap `gpu + x11egl` agar MPV tetap berada di child window RoxyTube; jangan memakai `vo=drm`/direct KMS karena dapat melewati jendela Qt dan Safe Area.
 
-Langkah berikutnya setelah artifact tersedia:
-1. Pasang runtime ke direktori app-local tanpa mengganti binary sistem.
-2. Verifikasi `mpv --hwdec=help` menampilkan non-copy `v4l2m2m`, dan `mpv --gpu-hwdec-interop=help` menampilkan `drmprime`.
-3. Uji video H.264 1080p pada X11 child window dan pastikan log menampilkan `drm_prime[nv12]` (atau format DRM PRIME yang sesuai).
-4. Ukur CPU, frame-drop, seek, subtitle, audio, dan Safe Area sebelum menjadikan mode ini default. Mode eksperimen dijalankan dengan `ROXY_ENABLE_DRMPRIME=1 sh scripts/run.sh`.
-
 ### 5. Safe Area dan integrasi antarmuka
 
 Safe Area yang sudah ada dipertahankan:
@@ -120,7 +114,20 @@ Safe Area yang sudah ada dipertahankan:
 - Renderer GPU tidak boleh meminta fullscreen KMS, mengganti mode layar, atau mengubah Xorg/Openbox.
 - Tombol Safe Area, kontrol playback, mini-player, dan navigasi remote tetap milik RoxyTube.
 
+**Batas integrasi Safe Area Manager:** branch ini belum mengklaim integrasi runtime dengan Safe Area Manager. Untuk saat ini, geometri safe area masih memakai mekanisme kompatibilitas yang dimiliki RoxyTube sendiri. Integrasi baru boleh dibuat setelah Safe Area Manager menyediakan kontrak runtime/IPC yang terdokumentasi dan dapat diuji. Jangan menambahkan dispatcher, policy engine, atau fullscreen controller kedua di RoxyTube. Target integrasi adalah RoxyTube meminta/mengikuti geometri dari satu pengelola Safe Area, sementara MPV tetap menjadi child window Qt dan tidak mengambil alih fullscreen.
+
 Jalur DRM PRIME berbasis overlay DRM langsung dapat melewati jendela X11 dan berpotensi merusak Safe Area. Karena itu, jalur overlay langsung bukan default untuk branch ini; interop EGL/X11 harus dievaluasi terlebih dahulu.
+
+### 6. Regression checks
+
+`tests/test_playback_contract.py` dan workflow `.github/workflows/python-syntax.yml` menjaga beberapa batas arsitektur secara statis:
+- MPV harus tetap tertanam pada native child window Qt melalui `--wid`.
+- Renderer tetap GPU/X11 EGL; jalur DRM/KMS fullscreen tidak boleh disisipkan ke launcher.
+- Input remote tetap ditangani RoxyTube, bukan binding keyboard MPV.
+- yt-dlp app-local harus diprioritaskan dan tersedia pada PATH proses MPV.
+- Jalur DRM PRIME tetap opt-in sampai runtime dan perangkat membuktikan dukungannya.
+
+Tes statis tidak membuktikan hardware decoding atau zero-copy; pengujian playback pada HG680P tetap wajib.
 
 ## Pengujian dan kriteria selesai
 
@@ -148,9 +155,11 @@ DRM PRIME baru dianggap selesai jika log membuktikan frame DRM PRIME diterima ol
 - [x] Override interop GPU DRM PRIME disediakan, tetapi tidak aktif pada build saat ini.
 - [x] Installer runtime app-local dan launcher opt-in ditambahkan.
 - [x] Safe Area lama dipertahankan.
+- [x] Regression checks untuk kontrak embedded/windowed MPV ditambahkan ke CI.
 - [ ] Uji syntax dan installer di CI.
 - [ ] Jalankan installer dan playback di HG680P.
 - [x] Pin source FFmpeg Amlogic dan patch LibreELEC; CI memastikan patch dapat diterapkan.
 - [x] Siapkan build script dan GitHub Actions ARM64 untuk runtime terisolasi.
 - [ ] Selesaikan build artifact FFmpeg/MPV DRM PRIME.
 - [ ] Uji zero-copy DRM PRIME di HG680P.
+- [ ] Integrasikan Safe Area Manager setelah kontrak runtime/IPC resmi tersedia.
