@@ -64,6 +64,57 @@ def mpv_process_environment():
     return environment
 
 
+def detect_display_refresh_rate():
+    """Return the active Qt screen refresh rate, or 0 when it is unavailable."""
+    override = os.environ.get("ROXY_DISPLAY_FPS")
+    if override:
+        try:
+            rate = float(override)
+            if 20.0 <= rate <= 240.0:
+                return rate
+        except (TypeError, ValueError):
+            pass
+    try:
+        screen = QApplication.primaryScreen()
+        rate = float(screen.refreshRate()) if screen is not None else 0.0
+        return rate if 20.0 <= rate <= 240.0 else 0.0
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return 0.0
+
+
+def display_fps_buckets(refresh_rate):
+    """Return preferred source FPS values for common 50/60 Hz display modes."""
+    try:
+        rate = float(refresh_rate)
+    except (TypeError, ValueError):
+        return ()
+    if 47.0 <= rate <= 53.0:
+        return (50, 25)
+    if 57.0 <= rate <= 63.0:
+        return (60, 30)
+    return ()
+
+
+def quality_format_selector(quality, refresh_rate):
+    """Prefer refresh-matched AVC formats, then cadence-friendly half-rate, then any AVC."""
+    height_filter = {
+        "360p": "[height<=360]",
+        "480p": "[height<=480]",
+        "720p": "[height<=720]",
+        "1080p": "[height<=1080]",
+    }.get(quality, "")
+    video_filter = f"[vcodec^=avc1]{height_filter}"
+    base = f"bv*{video_filter}+ba/b{video_filter}"
+    selectors = []
+    for fps in display_fps_buckets(refresh_rate):
+        fps_filter = f"[fps>={fps - 1}][fps<={fps + 1}]"
+        selectors.append(
+            f"(bv*{video_filter}{fps_filter}+ba/b{video_filter}{fps_filter})"
+        )
+    selectors.append(f"({base})")
+    return "/".join(selectors)
+
+
 def mpv_ytdl_raw_options(quality):
     """Pass the isolated yt-dlp config policy through MPV's ytdl_hook."""
     resolution = quality.replace("p", "") if quality != "Auto" else "1080"
@@ -1261,9 +1312,9 @@ class MainWindow(QMainWindow):
         self.quality = QComboBox()
         self.quality.setFocusPolicy(Qt.StrongFocus)
         self.quality.addItems(list(QUALITY_FORMATS))
-        self.quality.setCurrentText("720p")
+        self.quality.setCurrentText("Auto")
         self.quality.setMinimumWidth(68)
-        self.quality.setToolTip("Batas resolusi maksimum stream; resolusi aktual ditampilkan di bawah judul video.")
+        self.quality.setToolTip("Auto menyesuaikan prioritas FPS dengan refresh layar; pilihan kualitas manual membatasi resolusi.")
         self.quality.currentTextChanged.connect(self.change_quality)
         controls.addWidget(self.previous_video_button)
         controls.addWidget(self.rewind_button)
@@ -1912,6 +1963,8 @@ class MainWindow(QMainWindow):
         self.player_process = process
         # Attach MPV to the native Qt child window; do not create a separate
         # top-level MPV window. HG680P's verified audible ALSA route is dmix.
+        display_refresh_rate = detect_display_refresh_rate()
+        selected_format = quality_format_selector(self.quality.currentText(), display_refresh_rate)
         args = ["--no-osc", f"--vo={MPV_VO}",
                 f"--gpu-context={MPV_GPU_CONTEXT}", f"--gpu-api={MPV_GPU_API}",
                 f"--hwdec={self.current_hwdec}", "--hwdec-codecs=h264",
@@ -1924,7 +1977,7 @@ class MainWindow(QMainWindow):
                 "--ao=alsa",
                 "--audio-device=alsa/dmix:CARD=S905XP212,DEV=0",
                 f"--input-ipc-server={self.ipc_path}",
-                f"--ytdl-format={QUALITY_FORMATS[self.quality.currentText()]}",
+                f"--ytdl-format={selected_format}",
                 f"--ytdl-raw-options={mpv_ytdl_raw_options(self.quality.currentText())}",
                 "--keep-open=no"]
         if MPV_GPU_HWDEC_INTEROP and self.current_hwdec == "v4l2m2m":
