@@ -79,7 +79,7 @@ meson setup "$WORK/mpv/build" "$WORK/mpv" \
     -Dlibmpv=false \
     -Dtests=false \
     -Dmanpage-build=disabled \
-    -Dlua=disabled \
+    -Dlua=luajit \
     -Djavascript=disabled \
     -Dwayland=disabled \
     -Dx11=enabled \
