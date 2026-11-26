@@ -97,6 +97,62 @@ QUALITY_FORMATS = {
 }
 
 
+def refresh_rate_target(refresh_rate):
+    """Map common display refresh rates to a matching YouTube FPS preference."""
+    try:
+        rate = float(refresh_rate)
+    except (TypeError, ValueError):
+        return None
+    if 47.0 <= rate <= 53.0:
+        return 50
+    if 57.0 <= rate <= 63.0:
+        return 60
+    return None
+
+
+def screen_refresh_rate(widget=None):
+    """Read the refresh rate of the screen containing the playback surface."""
+    screen = None
+    if widget is not None:
+        try:
+            screen = widget.screen()
+        except (AttributeError, RuntimeError):
+            screen = None
+    if screen is None:
+        screen = QApplication.primaryScreen()
+    if screen is None:
+        return None
+    try:
+        rate = float(screen.refreshRate())
+    except (AttributeError, TypeError, ValueError, RuntimeError):
+        return None
+    return rate if rate > 0 else None
+
+
+def avc_format_selector(height_limit=None, fps_filter=None):
+    """Build an AVC selector with optional resolution and FPS constraints."""
+    filters = ["vcodec^=avc1"]
+    if height_limit is not None:
+        filters.append(f"height<={int(height_limit)}")
+    if fps_filter:
+        filters.append(fps_filter)
+    expression = "".join(f"[{item}]" for item in filters)
+    return f"bv*{expression}+ba/b{expression}"
+
+
+def quality_format(quality, refresh_rate=None):
+    """Prefer an FPS matching the active display, then safely fall back to AVC."""
+    quality_limits = {"360p": 360, "480p": 480, "720p": 720, "1080p": 1080}
+    height_limit = quality_limits.get(quality)
+    base = QUALITY_FORMATS.get(quality, QUALITY_FORMATS["Auto"])
+    target_fps = refresh_rate_target(refresh_rate)
+    if target_fps is None:
+        return base
+    exact = avc_format_selector(height_limit, f"fps={target_fps}")
+    compatible = avc_format_selector(height_limit, f"fps<={target_fps}")
+    return f"{exact}/{compatible}/{base}"
+
+
 def safe_area_margins():
     values = {"margin_left": 4, "margin_right": 4, "margin_top": 4, "margin_bottom": 4}
     try:
@@ -1924,7 +1980,7 @@ class MainWindow(QMainWindow):
                 "--ao=alsa",
                 "--audio-device=alsa/dmix:CARD=S905XP212,DEV=0",
                 f"--input-ipc-server={self.ipc_path}",
-                f"--ytdl-format={QUALITY_FORMATS[self.quality.currentText()]}",
+                f"--ytdl-format={quality_format(self.quality.currentText(), screen_refresh_rate(self.video_surface))}",
                 f"--ytdl-raw-options={mpv_ytdl_raw_options(self.quality.currentText())}",
                 "--keep-open=no"]
         if MPV_GPU_HWDEC_INTEROP and self.current_hwdec == "v4l2m2m":
