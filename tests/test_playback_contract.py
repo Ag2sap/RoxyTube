@@ -45,6 +45,8 @@ class YtDlpIsolationTests(unittest.TestCase):
         helper = function_source(APP_SOURCE, "ytdlp_arguments")
         self.assertIn('"--ignore-config"', helper)
         self.assertIn("APP_YTDLP_CONFIG", helper)
+        self.assertIn("APP_DENO.is_file()", helper)
+        self.assertIn("--js-runtimes", helper)
         self.assertEqual(APP_SOURCE.count("process.setProgram(YTDLP)"), 4)
         self.assertEqual(APP_SOURCE.count("process.setArguments(ytdlp_arguments("), 4)
 
@@ -55,6 +57,8 @@ class YtDlpIsolationTests(unittest.TestCase):
         self.assertIn("APP_YTDLP_CONFIG", raw_options)
         self.assertIn("PATH", environment)
         self.assertIn("YTDLP", environment)
+        self.assertIn("APP_DENO", environment)
+        self.assertIn("DENO_DIR", environment)
 
 
 class PlaybackContractTests(unittest.TestCase):
