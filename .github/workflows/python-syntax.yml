@@ -26,6 +26,7 @@ jobs:
         run: |
           sh -n scripts/run.sh
           sh -n scripts/install-yt-dlp.sh
+          sh -n scripts/install-deno.sh
           sh -n scripts/install-drmprime-runtime.sh
           bash -n scripts/build-drmprime-runtime.sh
           bash -n scripts/check-drmprime-patch.sh
