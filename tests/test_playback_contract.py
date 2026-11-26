@@ -90,6 +90,23 @@ class PlaybackContractTests(unittest.TestCase):
         self.assertLess(retry.index("if self.decoder_fallbacks"), retry.index("elif self.fallback_qualities"))
         self.assertIn("self.current_hwdec = next_decoder", retry)
 
+    def test_adaptive_fps_prefers_active_display_then_falls_back(self):
+        rate_target = function_source(APP_SOURCE, "refresh_rate_target")
+        screen_rate = function_source(APP_SOURCE, "screen_refresh_rate")
+        selector = function_source(APP_SOURCE, "avc_format_selector")
+        adaptive = function_source(APP_SOURCE, "quality_format")
+        launch = function_source(APP_SOURCE, "_launch_player")
+        self.assertIn("47.0 <= rate <= 53.0", rate_target)
+        self.assertIn("57.0 <= rate <= 63.0", rate_target)
+        self.assertIn("widget.screen()", screen_rate)
+        self.assertIn("QApplication.primaryScreen()", screen_rate)
+        self.assertIn('filters = ["vcodec^=avc1"]', selector)
+        self.assertIn('f"fps={target_fps}"', adaptive)
+        self.assertIn('f"fps<={target_fps}"', adaptive)
+        self.assertIn('return f"{exact}/{compatible}/{base}"', adaptive)
+        self.assertIn("quality_format(self.quality.currentText(), screen_refresh_rate(self.video_surface))", launch)
+
+
     def test_drmprime_runtime_is_opt_in_and_has_copy_software_fallbacks(self):
         self.assertIn('ROXY_ENABLE_DRMPRIME:-0', RUN_SOURCE)
         self.assertIn('ROXY_MPV_HWDEC:-v4l2m2m', RUN_SOURCE)
