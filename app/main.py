@@ -86,12 +86,14 @@ MPV_VO = os.environ.get("ROXY_MPV_VO", "gpu")
 MPV_GPU_CONTEXT = os.environ.get("ROXY_MPV_GPU_CONTEXT", "x11egl")
 MPV_GPU_API = os.environ.get("ROXY_MPV_GPU_API", "opengl")
 MPV_GPU_HWDEC_INTEROP = os.environ.get("ROXY_MPV_GPU_HWDEC_INTEROP", "")
+# Prefer YouTube AVC/H.264 streams so HG680P can use meson-vdec.
+# Auto retains the baseline's 1080p preference; explicit choices are hard caps.
 QUALITY_FORMATS = {
-    "Auto": "bv*+ba/b",
-    "360p": "bv*[height<=360]+ba/b[height<=360]",
-    "480p": "bv*[height<=480]+ba/b[height<=480]",
-    "720p": "bv*[height<=720]+ba/b[height<=720]",
-    "1080p": "bv*[height<=1080]+ba/b[height<=1080]",
+    "Auto": "bv*[vcodec^=avc1]+ba/b[vcodec^=avc1]",
+    "360p": "bv*[vcodec^=avc1][height<=360]+ba/b[vcodec^=avc1][height<=360]",
+    "480p": "bv*[vcodec^=avc1][height<=480]+ba/b[vcodec^=avc1][height<=480]",
+    "720p": "bv*[vcodec^=avc1][height<=720]+ba/b[vcodec^=avc1][height<=720]",
+    "1080p": "bv*[vcodec^=avc1][height<=1080]+ba/b[vcodec^=avc1][height<=1080]",
 }
 
 
@@ -1895,7 +1897,12 @@ class MainWindow(QMainWindow):
         self.player_process = None
         self.dispose_mpv_event_socket()
         if self.process_is_running(old_process):
-            old_process.kill()
+            # Wait for the previous MPV to release the video window and IPC socket
+            # before launching its replacement after a quality change.
+            old_process.terminate()
+            if not old_process.waitForFinished(900):
+                old_process.kill()
+                old_process.waitForFinished(900)
         self.ipc_path = f"/tmp/roxy-youtube-tv-{os.getpid()}-{self.current_index}.sock"
         try:
             Path(self.ipc_path).unlink(missing_ok=True)
@@ -1907,7 +1914,8 @@ class MainWindow(QMainWindow):
         # top-level MPV window. HG680P's verified audible ALSA route is dmix.
         args = ["--no-osc", f"--vo={MPV_VO}",
                 f"--gpu-context={MPV_GPU_CONTEXT}", f"--gpu-api={MPV_GPU_API}",
-                f"--hwdec={self.current_hwdec}", f"--wid={int(self.video_surface.winId())}",
+                f"--hwdec={self.current_hwdec}", "--hwdec-codecs=h264",
+                f"--wid={int(self.video_surface.winId())}",
                 # Keep MPV embedded in the Qt child window. Qt remains responsible
                 # for Safe Area geometry; MPV never takes over the display.
                 # RoxyTube owns D-pad input and sends playback commands over IPC.
