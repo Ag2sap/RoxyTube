@@ -103,7 +103,7 @@ chmod 0755 "$PREFIX/bin/mpv"
 # Fail the build if the intended decoder or DRM PRIME interop was not compiled.
 HWDEC_LIST="$("$PREFIX/bin/mpv" --no-config --hwdec=help 2>&1)"
 printf '%s\n' "$HWDEC_LIST"
-printf '%s\n' "$HWDEC_LIST" | grep -q 'v4l2m2m' || {
+printf '%s\n' "$HWDEC_LIST" | grep -q 'v4l2m2m (' || {
     echo "MPV does not expose the V4L2 M2M decoder." >&2
     exit 1
 }
