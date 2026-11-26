@@ -103,7 +103,7 @@ class PlaybackContractTests(unittest.TestCase):
         self.assertIn('filters = ["vcodec^=avc1"]', selector)
         self.assertIn('f"fps={target_fps}"', adaptive)
         self.assertIn('f"fps<={target_fps}"', adaptive)
-        self.assertIn("return f"{exact}/{compatible}/{base}"", adaptive)
+        self.assertIn('return f"{exact}/{compatible}/{base}"', adaptive)
         self.assertIn("quality_format(self.quality.currentText(), screen_refresh_rate(self.video_surface))", launch)
 
 
