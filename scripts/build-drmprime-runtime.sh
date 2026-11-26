@@ -127,6 +127,6 @@ Runtime is app-local and does not replace system FFmpeg or MPV.
 INFO
 
 tar -C "$STAGE/.." -czf "$DIST/roxytube-mpv-drmprime-aarch64.tar.gz" runtime
-sha256sum "$DIST/roxytube-mpv-drmprime-aarch64.tar.gz" \
-    > "$DIST/roxytube-mpv-drmprime-aarch64.tar.gz.sha256"
+(cd "$DIST" && sha256sum "roxytube-mpv-drmprime-aarch64.tar.gz" \
+    > "roxytube-mpv-drmprime-aarch64.tar.gz.sha256")
 echo "Build complete: $DIST/roxytube-mpv-drmprime-aarch64.tar.gz"
