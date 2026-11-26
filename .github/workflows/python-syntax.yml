@@ -24,3 +24,5 @@ jobs:
         run: python -m py_compile app/main.py
       - name: Check yt-dlp installer shell syntax
         run: sh -n scripts/install-yt-dlp.sh
+      - name: Check FFmpeg DRM PRIME patch compatibility
+        run: bash scripts/check-drmprime-patch.sh
