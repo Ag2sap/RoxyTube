@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "profiles": {
+    "720x576": {
+      "left": 45,
+      "top": 10,
+      "right": 45,
+      "bottom": 10
+    },
+    "1920x1080": {
+      "left": 0,
+      "top": 0,
+      "right": 0,
+      "bottom": 0
+    }
+  }
+}
