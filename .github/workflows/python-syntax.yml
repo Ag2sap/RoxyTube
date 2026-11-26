@@ -22,6 +22,8 @@ jobs:
           python-version: "3.12"
       - name: Compile application source
         run: python -m py_compile app/main.py
+      - name: Check embedded MPV playback contract
+        run: python -m unittest discover -s tests -v
       - name: Check yt-dlp installer shell syntax
         run: sh -n scripts/install-yt-dlp.sh
       - name: Check FFmpeg DRM PRIME patch compatibility
