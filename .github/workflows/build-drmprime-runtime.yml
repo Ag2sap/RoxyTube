@@ -31,7 +31,8 @@ jobs:
             libdrm-dev libx11-dev libxext-dev libxrandr-dev libxv-dev \
             libegl1-mesa-dev libgles2-mesa-dev libgl-dev libgbm-dev \
             libasound2-dev libass-dev libuchardet-dev libssl-dev zlib1g-dev \
-            libfreetype-dev libfontconfig1-dev libfribidi-dev libharfbuzz-dev
+            libfreetype-dev libfontconfig1-dev libfribidi-dev libharfbuzz-dev \
+            libplacebo-dev
       - name: Build isolated FFmpeg and MPV DRM PRIME runtime
         run: bash scripts/build-drmprime-runtime.sh
       - name: Upload ARM64 runtime
