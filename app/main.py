@@ -20,6 +20,8 @@ SETTINGS_FILE = CONFIG_DIR / "roxy-youtube-tv" / "settings.json"
 CACHE_DIR = Path.home() / ".cache" / "roxy-youtube-tv" / "thumbnails"
 APP_DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "roxy-youtube-tv"
 APP_YTDLP = APP_DATA_DIR / "bin" / "yt-dlp"
+APP_DENO = APP_DATA_DIR / "runtime" / "bin" / "deno"
+APP_DENO_CACHE = APP_DATA_DIR / "cache" / "deno"
 APP_YTDLP_CONFIG = CONFIG_DIR / "roxy-youtube-tv" / "yt-dlp.conf"
 
 
@@ -38,6 +40,8 @@ def ytdlp_arguments(arguments):
     args = ["--ignore-config"]
     if APP_YTDLP_CONFIG.is_file():
         args.extend(["--config-locations", str(APP_YTDLP_CONFIG)])
+    if APP_DENO.is_file() and os.access(APP_DENO, os.X_OK):
+        args.extend(["--js-runtimes", f"deno:{APP_DENO}"])
     return args + list(arguments)
 
 
@@ -46,11 +50,17 @@ def mpv_process_environment():
     environment = QProcessEnvironment.systemEnvironment()
     executable = shutil.which(YTDLP) or YTDLP
     executable_path = Path(executable)
+    path_entries = []
     if executable_path.is_absolute():
-        bin_dir = str(executable_path.resolve().parent)
-        current_path = environment.value("PATH")
-        if bin_dir not in current_path.split(os.pathsep):
-            environment.insert("PATH", bin_dir + os.pathsep + current_path)
+        path_entries.append(str(executable_path.resolve().parent))
+    if APP_DENO.is_file() and os.access(APP_DENO, os.X_OK):
+        path_entries.append(str(APP_DENO.resolve().parent))
+        environment.insert("DENO_DIR", str(APP_DENO_CACHE))
+    current_path = environment.value("PATH")
+    for entry in reversed(path_entries):
+        if entry not in current_path.split(os.pathsep):
+            current_path = entry + os.pathsep + current_path
+    environment.insert("PATH", current_path)
     return environment
 
 
@@ -60,6 +70,8 @@ def mpv_ytdl_raw_options(quality):
     options = ["ignore-config=", "sub-langs=none", f"format-sort=res:{resolution}"]
     if APP_YTDLP_CONFIG.is_file():
         options.append(f"config-locations={APP_YTDLP_CONFIG}")
+    if APP_DENO.is_file() and os.access(APP_DENO, os.X_OK):
+        options.append(f"js-runtimes=deno:{APP_DENO}")
     return ",".join(options)
 
 
