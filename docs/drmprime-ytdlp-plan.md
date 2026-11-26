@@ -87,14 +87,30 @@ Referensi teknis:
 - Patch V4L2 DRM PRIME LibreELEC: https://github.com/LibreELEC/LibreELEC.tv/tree/master/packages/multimedia/ffmpeg/patches/v4l2-drmprime
 - MPV manual (DRM PRIME overlay dan plane): https://mpv.io/manual/stable/
 
-Patch dari proyek S905X lama ditujukan untuk FFmpeg 4.4.x dan tidak boleh diasumsikan cocok dengan FFmpeg 6.1.1 milik HG680P. Branch ini sengaja belum mengganti library sistem atau mengklaim patch sudah kompatibel.
+Patch dari proyek S905X lama ditujukan untuk FFmpeg 4.4.x dan tidak boleh diasumsikan cocok dengan FFmpeg 6.1.1 milik HG680P. Untuk eksperimen ini, source dipin ke FFmpeg Amlogic fork commit `ad8c2e36ee2d5a30442f6e4ca0e82df2622f8958` (branch `armsoc-9.0.2`) dan patch DRM PRIME LibreELEC dipin ke commit `ceb19682c636ace4d7403d430e7a76c990c62db7`. Pemeriksaan otomatis di GitHub Actions sudah memastikan patch tersebut dapat diterapkan bersih pada source FFmpeg yang dipin.
 
-Langkah implementasi berikutnya:
-1. Pin source FFmpeg Amlogic/V4L2 yang menyediakan ekspor DRM PRIME dan catat commit serta lisensinya.
-2. Build FFmpeg ARM64 terisolasi, lalu pastikan decoder H.264 menghasilkan `AV_PIX_FMT_DRM_PRIME` dan descriptor DMA-BUF yang valid.
-3. Build MPV terisolasi terhadap FFmpeg tersebut; verifikasi interop yang benar dengan `mpv --gpu-hwdec-interop=help` dan uji format hasil decoder. Pada kombinasi yang mendukungnya, mode V4L2 DRM PRIME di MPV menggunakan `--hwdec=v4l2m2m` (bukan `v4l2m2m-copy`) dan interop `drmprime`.
-4. Jika hasil build mengenali mode tersebut, aktifkan secara opt-in melalui `ROXY_MPV_HWDEC=v4l2m2m` dan `ROXY_MPV_GPU_HWDEC_INTEROP=drmprime`. Pertahankan renderer GPU EGL/X11 bila interop tersebut dapat bekerja di child window. Jangan mengaktifkan `vo=drm` atau mengambil alih KMS secara langsung tanpa desain Safe Area baru.
-5. Hanya setelah pengujian berhasil, tambahkan paket runtime terisolasi dan opsi DRM PRIME khusus untuk build tersebut.
+Build terisolasi sekarang disiapkan:
+- `scripts/check-drmprime-patch.sh`: cek kompatibilitas patch yang reproducible.
+- `scripts/build-drmprime-runtime.sh`: build FFmpeg dengan V4L2 M2M + libdrm, lalu MPV `v0.42.0` dengan EGL/X11/OpenGL. Hasilnya dibungkus sebagai runtime terpisah.
+- `.github/workflows/build-drmprime-runtime.yml`: build ARM64 di GitHub Actions dan unggah artifact selama 14 hari.
+
+Build ini tidak mengubah FFmpeg/MPV sistem. Build workflow harus selesai dan artifact harus lolos pemeriksaan sebelum runtime dicoba di HG680P.
+
+Untuk MPV hasil build yang sudah terbukti menyediakan non-copy V4L2 DRM PRIME, konfigurasi opt-in RoxyTube yang dituju adalah:
+
+```bash
+ROXY_MPV="$HOME/.local/share/roxy-youtube-tv/runtime/bin/mpv" \
+ROXY_MPV_HWDEC=v4l2m2m \
+ROXY_MPV_GPU_HWDEC_INTEROP=drmprime
+```
+
+Mode tersebut belum diaktifkan sebagai default dan belum diuji di HG680P. Renderer tetap `gpu + x11egl` agar MPV tetap berada di child window RoxyTube; jangan memakai `vo=drm`/direct KMS karena dapat melewati jendela Qt dan Safe Area.
+
+Langkah berikutnya setelah artifact tersedia:
+1. Pasang runtime ke direktori app-local tanpa mengganti binary sistem.
+2. Verifikasi `mpv --hwdec=help` menampilkan non-copy `v4l2m2m`, dan `mpv --gpu-hwdec-interop=help` menampilkan `drmprime`.
+3. Uji video H.264 1080p pada X11 child window dan pastikan log menampilkan `drm_prime[nv12]` (atau format DRM PRIME yang sesuai).
+4. Ukur CPU, frame-drop, seek, subtitle, audio, dan Safe Area sebelum menjadikan mode ini default.
 
 ### 5. Safe Area dan integrasi antarmuka
 
@@ -133,5 +149,7 @@ DRM PRIME baru dianggap selesai jika log membuktikan frame DRM PRIME diterima ol
 - [x] Safe Area lama dipertahankan.
 - [ ] Uji syntax dan installer di CI.
 - [ ] Jalankan installer dan playback di HG680P.
-- [ ] Validasi patch FFmpeg DRM PRIME terhadap source Amlogic yang dipin.
-- [ ] Build FFmpeg/MPV DRM PRIME terisolasi dan uji zero-copy di perangkat.
+- [x] Pin source FFmpeg Amlogic dan patch LibreELEC; CI memastikan patch dapat diterapkan.
+- [x] Siapkan build script dan GitHub Actions ARM64 untuk runtime terisolasi.
+- [ ] Selesaikan build artifact FFmpeg/MPV DRM PRIME.
+- [ ] Uji zero-copy DRM PRIME di HG680P.
