@@ -35,7 +35,30 @@ Run as the normal desktop user (HG680P: roxy), not root. Device deployment uses 
 
 ## Run
 
+Install the latest official yt-dlp ARM64 binary into the RoxyTube user-local runtime (no sudo; does not replace system yt-dlp):
+
+    sh scripts/install-yt-dlp.sh
+
+Then launch:
+
     sh scripts/run.sh
+
+RoxyTube prefers `~/.local/share/roxy-youtube-tv/bin/yt-dlp`; if it is absent, it falls back to `yt-dlp` on PATH. The same app-local binary is exposed to MPV's ytdl hook.
+
+## Playback / hardware decoding
+
+The experimental `feat/mpv-drmprime-ytdlp` branch uses MPV's GPU renderer through X11 EGL, with `v4l2m2m-copy` as the tested transition hardware-decoder path. It keeps MPV embedded in RoxyTube's Qt child window and preserves the existing Safe Area geometry.
+
+This is **not yet DRM PRIME zero-copy**. DRM PRIME requires an FFmpeg V4L2 build that exports DMA-BUF frames and an MPV interop path that can consume them. See [the DRM PRIME and yt-dlp plan](docs/drmprime-ytdlp-plan.md) for compatibility notes, build steps, and device acceptance tests.
+
+Optional runtime overrides:
+
+- `ROXY_YT_DLP`: explicit yt-dlp executable
+- `ROXY_MPV`: explicit MPV executable
+- `ROXY_MPV_HWDEC`: hardware decoder (default `v4l2m2m-copy`)
+- `ROXY_MPV_VO`: video output (default `gpu`)
+- `ROXY_MPV_GPU_CONTEXT`: GPU context (default `x11egl`)
+- `ROXY_MPV_GPU_API`: GPU API (default `opengl`)
 
 ## Safe Area
 
