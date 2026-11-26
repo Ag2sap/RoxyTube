@@ -67,12 +67,13 @@ The integration branch now includes the following source changes:
 - yt-dlp is resolved in this order: explicit `ROXY_YT_DLP` override, app-local binary, then PATH.
 - Every direct yt-dlp process uses `--ignore-config`; if the app-specific config exists, it is loaded explicitly with `--config-locations`. The user's global yt-dlp config is not inherited.
 - MPV's ytdl hook is given the same yt-dlp directory through PATH and receives the isolated config options.
+- `scripts/install-deno.sh` installs the official latest ARM64 Deno binary app-locally with SHA-256 verification. Direct yt-dlp calls and MPV's ytdl hook explicitly select it when present; Deno's cache is kept under RoxyTube app data.
 - Quality choices include 1080p, with quality fallback after decoder fallback.
 - Normal MPV playback uses GPU/X11 EGL and `v4l2m2m-copy` by default. The optional isolated runtime requests its V4L2 DRM PRIME decoder first, then retries `v4l2m2m-copy` and software decoding.
 - The DRM PRIME build, checksum-verified installer, patch compatibility check, and ARM64 Actions workflow are present on this branch.
 - Static tests protect Channel features, yt-dlp config isolation, embedded MPV, decoder fallback, remote input ownership, and Qt Safe Area boundaries.
 
-This is source/CI integration only. It is not yet evidence that the DRM PRIME runtime builds successfully or that the HG680P can use zero-copy frames. The JavaScript runtime and PO Token provider needed to resolve YouTube SABR/format availability remain a separate diagnostic/integration task; the current branch isolates the known global client override but does not claim that this alone guarantees 720p/1080p formats.
+This is source/CI integration only. It is not yet evidence that the DRM PRIME runtime builds successfully or that the HG680P can use zero-copy frames. The app-local JavaScript runtime is now integrated for yt-dlp EJS. A PO Token provider is not bundled or started automatically yet: the recommended bgutil provider has a separate server/plugin lifecycle, so it needs a carefully scoped, loopback-only setup and memory/performance validation on the 2 GB HG680P. The branch does not claim that Deno alone guarantees 720p/1080p formats.
 
 ## Validation checklist
 
