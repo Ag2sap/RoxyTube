@@ -160,7 +160,7 @@ def save_safe_area_pixel_profile(screen_width, screen_height, margins):
         profiles[resolution] = values
         WINDOW_SAFE_AREA_FILE.parent.mkdir(parents=True, exist_ok=True)
         temporary = WINDOW_SAFE_AREA_FILE.with_suffix(".tmp")
-        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\\n",
+        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n",
                              encoding="utf-8")
         temporary.replace(WINDOW_SAFE_AREA_FILE)
         return True
