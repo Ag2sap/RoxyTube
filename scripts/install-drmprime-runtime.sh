@@ -49,12 +49,20 @@ DEST="$DEST_PARENT/runtime"
 mkdir -p "$DEST_PARENT"
 
 if [ -e "$DEST" ]; then
-    BACKUP="$DEST_PARENT/runtime.backup.$$"
-    mv "$DEST" "$BACKUP"
+    BACKUP="$DEST_PARENT/runtime.backup.$"
+    cp -a "$DEST" "$BACKUP"
     echo "Previous app-local runtime backed up to: $BACKUP"
+    # Preserve the app-local Deno runtime while replacing only MPV and its libraries.
+    mkdir -p "$DEST/bin"
+    rm -rf "$DEST/lib"
+    rm -f "$DEST/bin/mpv" "$DEST/bin/mpv.real"
+    cp -a "$TMP_DIR/runtime/lib" "$DEST/"
+    cp -a "$TMP_DIR/runtime/bin/mpv" "$DEST/bin/"
+    cp -a "$TMP_DIR/runtime/bin/mpv.real" "$DEST/bin/"
+    cp -a "$TMP_DIR/runtime/BUILD-INFO.txt" "$DEST/"
+else
+    mv "$TMP_DIR/runtime" "$DEST"
 fi
-
-mv "$TMP_DIR/runtime" "$DEST"
 echo "Installed app-local DRM PRIME runtime: $DEST"
 "$DEST/bin/mpv" --version | head -n 2
 echo "Opt-in launch: ROXY_ENABLE_DRMPRIME=1 sh scripts/run.sh"
