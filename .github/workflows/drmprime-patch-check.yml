@@ -1,0 +1,17 @@
+name: DRM PRIME patch compatibility
+
+on:
+  push:
+    branches:
+      - feat/mpv-drmprime-ytdlp
+  workflow_dispatch:
+
+jobs:
+  check-ffmpeg-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install patch-check tools
+        run: sudo apt-get update && sudo apt-get install -y git curl
+      - name: Check pinned V4L2 DRM PRIME patch
+        run: bash scripts/check-drmprime-patch.sh
