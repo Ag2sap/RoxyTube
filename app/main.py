@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
 
 APP_NAME = "YouTube Roxy"
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-SAFE_AREA_FILE = CONFIG_DIR / "roxy-display" / "safe-area.json"  # legacy percentage-based UI inset
 WINDOW_SAFE_AREA_FILE = CONFIG_DIR / "roxy-youtube-tv" / "window-safe-area.json"
 SETTINGS_FILE = CONFIG_DIR / "roxy-youtube-tv" / "settings.json"
 CACHE_DIR = Path.home() / ".cache" / "roxy-youtube-tv" / "thumbnails"
