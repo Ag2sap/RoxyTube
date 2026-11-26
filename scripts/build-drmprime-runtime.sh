@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Build an isolated ARM64 FFmpeg+MPV runtime with V4L2 DRM PRIME support.
+# Build is intentionally opt-in from this experimental branch; system packages stay untouched.
 # This never installs or replaces system FFmpeg/MPV.
 set -euo pipefail
 
